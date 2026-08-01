@@ -1,0 +1,75 @@
+@import 'tailwindcss';
+
+/*
+ * iTerm2-inspired terminal theme.
+ *
+ * Colours are the standard ANSI 16-colour set (bright variants, which read
+ * better than the dim originals against a near-black background). Keeping the
+ * palette to real terminal colours is what makes the UI feel like a terminal
+ * rather than a dark-mode web app wearing a monospace font.
+ */
+@theme {
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+
+  /* surfaces */
+  --color-term-bg: #101010;
+  --color-term-panel: #151515;
+  --color-term-raise: #1c1c1c;
+  --color-term-line: #2b2b2b;
+  --color-term-sel: #23324d;
+
+  /* text */
+  --color-term-fg: #c7c7c7;
+  --color-term-dim: #6e6e6e;
+  --color-term-faint: #454545;
+
+  /* ANSI */
+  --color-ansi-red: #ff6e67;
+  --color-ansi-green: #5ffa68;
+  --color-ansi-yellow: #fffc67;
+  --color-ansi-orange: #ffa657;
+  --color-ansi-blue: #6871ff;
+  --color-ansi-magenta: #ff77ff;
+  --color-ansi-cyan: #60fdff;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-term-bg);
+  color: var(--color-term-fg);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-term-sel);
+  color: #ffffff;
+}
+
+/* Thin terminal-style scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #333333 transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #333333;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

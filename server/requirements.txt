@@ -1,0 +1,8 @@
+# Pinned to versions with prebuilt wheels for Python 3.11-3.14.
+# Earlier pydantic pins (<=2.10) have no pydantic-core wheel for 3.14 and fall
+# back to a Rust source build, which fails on a clean machine.
+fastapi==0.141.1
+uvicorn[standard]==0.52.0
+httpx==0.28.1
+pydantic==2.13.4
+python-dotenv==1.2.2
