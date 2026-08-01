@@ -1,17 +1,19 @@
 @import 'tailwindcss';
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
 
 /*
  * iTerm2-inspired terminal theme.
  *
  * Colours are the standard ANSI 16-colour set (bright variants, which read
  * better than the dim originals against a near-black background). Keeping the
- * palette to real terminal colours is what makes the UI feel like a terminal
- * rather than a dark-mode web app wearing a monospace font.
+ * palette to real terminal colours preserves the terminal character while
+ * Inter keeps the dense interface readable.
  */
 @theme {
-  --font-mono:
-    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas,
-    'Liberation Mono', 'Courier New', monospace;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Inter', ui-sans-serif, system-ui, sans-serif;
 
   /* surfaces */
   --color-term-bg: #101010;
@@ -47,8 +49,8 @@ body {
 body {
   background-color: var(--color-term-bg);
   color: var(--color-term-fg);
-  font-family: var(--font-mono);
-  font-size: 14px;
+  font-family: var(--font-sans);
+  font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }

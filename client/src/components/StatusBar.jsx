@@ -14,7 +14,7 @@ export default function StatusBar({
   const llmBusy = llmRunning > 0 || llmQueued > 0
 
   return (
-    <footer className="flex shrink-0 items-center gap-3 overflow-x-auto border-t border-term-line bg-term-panel px-3 py-1 text-[12px] whitespace-nowrap">
+    <footer className="flex shrink-0 items-center gap-3 overflow-x-auto border-t border-term-line bg-term-panel px-3 py-1 text-[13px] whitespace-nowrap">
       <span className="text-ansi-green">{reviewerId}</span>
       <span className="text-term-faint">│</span>
 

@@ -5,7 +5,7 @@ import BugList from './components/BugList.jsx'
 import ControlPanel from './components/ControlPanel.jsx'
 import ResetDemoDialog from './components/ResetDemoDialog.jsx'
 import StatusBar from './components/StatusBar.jsx'
-import { Toast } from './components/ui.jsx'
+import { Spinner, Toast } from './components/ui.jsx'
 import { api } from './lib/api.js'
 import { getReviewerId } from './lib/reviewer.js'
 
@@ -268,12 +268,35 @@ export default function App() {
     <div className="flex h-full flex-col">
       {/* Prompt line: title reads as a command typed after the shell arrow. */}
       <header className="flex shrink-0 items-center gap-2 border-b border-term-line bg-term-panel px-3 py-1.5">
-        <h1 className="text-[13px] text-term-dim">
+        <h1 className="text-[14px] text-term-dim">
           <span className="text-ansi-green" aria-hidden="true">
             ❯
           </span>{' '}
           hitl-prompt-improvement - triage · correct · improve · evaluate
         </h1>
+        <span className="flex-1" />
+        <a
+          href="/docs"
+          className="text-[14px] text-term-dim transition-colors duration-75 hover:text-ansi-cyan
+            focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2
+            focus-visible:outline-ansi-cyan"
+        >
+          docs
+        </a>
+        <button
+          type="button"
+          aria-label="Reset demo"
+          title="Reset demo"
+          disabled={resetDisabled || resetting}
+          onClick={() => setResetOpen(true)}
+          className="inline-flex h-7 w-7 items-center justify-center text-[21px] text-ansi-green
+            transition-colors duration-75 hover:text-ansi-green/80
+            disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-ansi-green
+            focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1
+            focus-visible:outline-ansi-cyan"
+        >
+          {resetting ? <Spinner /> : <span aria-hidden="true">↺</span>}
+        </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -304,9 +327,6 @@ export default function App() {
           evalProgress={evalProgress}
           onImprove={handleImprove}
           onRunEvaluation={handleRunEvaluation}
-          resetting={resetting}
-          resetDisabled={resetDisabled}
-          onReset={() => setResetOpen(true)}
         />
       </div>
 

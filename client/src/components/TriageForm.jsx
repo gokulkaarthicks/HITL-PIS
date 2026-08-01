@@ -83,7 +83,7 @@ export default function TriageForm({ bug, saving, onSave }) {
       </Field>
 
       {llm && (
-        <p className="flex flex-wrap items-center gap-2 text-[12px] text-term-dim">
+        <p className="flex flex-wrap items-center gap-2 text-[13px] text-term-dim">
           <span className="text-term-faint">llm output</span>
           <span className={SEVERITY_STYLES[llm.severity]}>{llm.severity}</span>
           <span className="text-term-faint">/</span>
@@ -101,10 +101,10 @@ export default function TriageForm({ bug, saving, onSave }) {
           {bug.human_corrected_json ? 'update correction' : 'save correction'}
         </Button>
         {dirty && (
-          <span className="text-[12px] text-ansi-yellow">unsaved changes</span>
+          <span className="text-[13px] text-ansi-yellow">unsaved changes</span>
         )}
         {!dirty && bug.human_corrected_json && (
-          <span className="text-[12px] text-ansi-green">correction saved</span>
+          <span className="text-[13px] text-ansi-green">correction saved</span>
         )}
       </div>
     </form>

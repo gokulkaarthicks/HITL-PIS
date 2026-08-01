@@ -40,7 +40,7 @@ export default function AddBugDialog({ open, submitting, onClose, onSubmit }) {
       >
         {/* Title bar, styled like the window chrome of a terminal split. */}
         <div className="flex items-center gap-2 border-b border-term-line px-3 py-1.5">
-          <span className="text-[13px] text-term-dim">add-bug-report</span>
+          <span className="text-[14px] text-term-dim">add-bug-report</span>
           <span className="flex-1" />
           <button
             onClick={onClose}
@@ -58,7 +58,7 @@ export default function AddBugDialog({ open, submitting, onClose, onSubmit }) {
             if (trimmed.length >= MIN_LENGTH) onSubmit(trimmed)
           }}
         >
-          <p className="text-[12px] text-term-faint">
+          <p className="text-[13px] text-term-faint">
             <span># </span>
             joins the review pool; the held-out evaluation set is unaffected
           </p>
@@ -74,7 +74,7 @@ export default function AddBugDialog({ open, submitting, onClose, onSubmit }) {
           </Field>
 
           {tooShort && (
-            <p className="text-[12px] text-ansi-yellow">
+            <p className="text-[13px] text-ansi-yellow">
               needs at least {MIN_LENGTH} characters
             </p>
           )}

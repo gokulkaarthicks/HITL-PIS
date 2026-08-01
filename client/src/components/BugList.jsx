@@ -21,8 +21,8 @@ export default function BugList({
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-term-line bg-term-panel">
       <div className="flex items-center justify-between gap-2 border-b border-term-line px-3 py-2">
         <div className="min-w-0">
-          <h2 className="text-[13px] text-term-fg">bug-reports</h2>
-          <p className="text-[12px] text-term-dim">
+          <h2 className="text-[14px] text-term-fg">bug-reports</h2>
+          <p className="text-[13px] text-term-dim">
             {bugs.length} total · {reviewedCount} reviewed
           </p>
         </div>
@@ -48,7 +48,7 @@ export default function BugList({
 
       <div className="flex-1 overflow-y-auto">
         {loading && bugs.length === 0 && (
-          <p className="flex items-center gap-2 px-3 py-3 text-[13px] text-term-dim">
+          <p className="flex items-center gap-2 px-3 py-3 text-[14px] text-term-dim">
             <Spinner />
             loading…
           </p>
@@ -80,7 +80,7 @@ export default function BugList({
                     }`}
                 >
                   <span
-                    className={`flex w-3 shrink-0 items-start justify-center pl-1 text-[13px] ${
+                    className={`flex w-3 shrink-0 items-start justify-center pl-1 text-[14px] ${
                       running
                         ? 'text-ansi-yellow'
                         : selected
@@ -93,10 +93,10 @@ export default function BugList({
                   </span>
 
                   <span className="min-w-0 flex-1">
-                    <span className="line-clamp-2 block text-[13px] leading-snug text-term-fg">
+                    <span className="line-clamp-2 block text-[14px] leading-snug text-term-fg">
                       {bug.report_text}
                     </span>
-                    <span className="mt-0.5 flex items-center gap-1.5 text-[12px]">
+                    <span className="mt-0.5 flex items-center gap-1.5 text-[13px]">
                       <Badge
                         className={
                           running

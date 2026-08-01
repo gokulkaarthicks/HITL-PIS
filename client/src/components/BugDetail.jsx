@@ -34,7 +34,7 @@ export default function BugDetail({
     <main className="flex-1 overflow-y-auto p-4">
       <div className="mx-auto max-w-3xl space-y-5">
         <section className="space-y-2">
-          <div className="flex items-center gap-2 text-[12px]">
+          <div className="flex items-center gap-2 text-[13px]">
             <Badge className={STATUS_STYLES[bug.status]}>
               {STATUS_LABELS[bug.status] ?? bug.status}
             </Badge>
@@ -45,11 +45,11 @@ export default function BugDetail({
             )}
           </div>
 
-          <p className="whitespace-pre-wrap border-l-2 border-term-line py-0.5 pl-3 text-[14px] leading-relaxed text-term-fg">
+          <p className="whitespace-pre-wrap border-l-2 border-term-line py-0.5 pl-3 text-[15px] leading-relaxed text-term-fg">
             {bug.report_text}
           </p>
 
-          <dl className="space-y-0.5 text-[12px]">
+          <dl className="space-y-0.5 text-[13px]">
             <MetaRow label="created" value={formatTimestamp(bug.created_at)} />
             <MetaRow label="llm run" value={formatTimestamp(bug.llm_run_at)} />
             <MetaRow label="reviewed" value={formatTimestamp(bug.reviewed_at)} />
@@ -60,7 +60,7 @@ export default function BugDetail({
           <Rule>triage output</Rule>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[12px] text-term-dim">
+            <p className="text-[13px] text-term-dim">
               active prompt{' '}
               <span className="text-ansi-cyan">{promptVersionName ?? '--'}</span>
             </p>
@@ -86,7 +86,7 @@ export default function BugDetail({
         {bug.llm_output_json?.rationale && (
           <section className="space-y-2">
             <Rule>model reason</Rule>
-            <p className="text-[13px] leading-relaxed text-term-dim">
+            <p className="text-[14px] leading-relaxed text-term-dim">
               {bug.llm_output_json.rationale}
             </p>
           </section>

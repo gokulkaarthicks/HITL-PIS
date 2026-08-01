@@ -61,7 +61,7 @@ export function Button({
     <button
       disabled={disabled || loading}
       className={`inline-flex items-center justify-center gap-1.5 border px-2.5 py-1
-        text-[13px] transition-colors duration-75
+        text-[14px] transition-colors duration-75
         disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent
         disabled:hover:text-inherit disabled:hover:border-term-line
         focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1
@@ -79,7 +79,7 @@ export function Button({
 export function Rule({ children, className = '' }) {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <span className="shrink-0 text-[12px] tracking-wide text-term-dim">
+      <span className="shrink-0 text-[13px] tracking-wide text-term-dim">
         {children}
       </span>
       <span className="h-px flex-1 bg-term-line" />
@@ -90,7 +90,7 @@ export function Rule({ children, className = '' }) {
 /** Empty states read as shell comments rather than as empty cards. */
 export function EmptyState({ title, description }) {
   return (
-    <div className="space-y-0.5 py-1 text-[13px] leading-relaxed">
+    <div className="space-y-0.5 py-1 text-[14px] leading-relaxed">
       <p className="text-term-dim">
         <span className="text-term-faint">#</span> {title}
       </p>
@@ -106,7 +106,7 @@ export function EmptyState({ title, description }) {
 export function Field({ label, hint, children }) {
   return (
     <label className="block">
-      <span className="mb-1 flex items-baseline justify-between gap-2 text-[12px] text-term-dim">
+      <span className="mb-1 flex items-baseline justify-between gap-2 text-[13px] text-term-dim">
         <span className="min-w-0 truncate">{label}</span>
         {hint && <span className="shrink-0 text-ansi-yellow">{hint}</span>}
       </span>
@@ -116,7 +116,7 @@ export function Field({ label, hint, children }) {
 }
 
 const CONTROL =
-  'w-full border border-term-line bg-term-bg px-2 py-1.5 text-[14px] text-term-fg ' +
+  'w-full border border-term-line bg-term-bg px-2 py-1.5 text-[15px] text-term-fg ' +
   'focus:border-ansi-cyan focus:outline-none'
 
 export function Select({ options, ...props }) {
@@ -149,7 +149,7 @@ export function Toast({ toast, onDismiss }) {
       role="status"
       aria-live="polite"
       className={`fixed bottom-8 right-3 z-50 flex max-w-lg items-start gap-2 border
-        bg-term-panel px-3 py-2 text-[13px] shadow-lg
+        bg-term-panel px-3 py-2 text-[14px] shadow-lg
         ${isError ? 'border-ansi-red/40' : 'border-ansi-green/40'}`}
     >
       <span className={isError ? 'text-ansi-red' : 'text-ansi-green'}>

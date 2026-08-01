@@ -40,6 +40,24 @@
       "OPENROUTER_API_KEY"
     ]
   },
+  "ratelimits": [
+    {
+      "name": "TRIAGE_RATE_LIMITER",
+      "namespace_id": "75210",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "EVALUATION_RATE_LIMITER",
+      "namespace_id": "75211",
+      "simple": {
+        "limit": 3,
+        "period": 60
+      }
+    }
+  ],
   "observability": {
     "enabled": true
   }

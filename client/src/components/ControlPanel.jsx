@@ -30,9 +30,6 @@ export default function ControlPanel({
   evalProgress,
   onImprove,
   onRunEvaluation,
-  resetting,
-  resetDisabled,
-  onReset,
 }) {
   const [showPrompt, setShowPrompt] = useState(false)
   const elapsed = useElapsedSeconds(evaluating)
@@ -51,28 +48,27 @@ export default function ControlPanel({
             description="run supabase/seed.sql to create the baseline"
           />
         ) : (
-          <div className="space-y-1 text-[13px]">
+          <div className="space-y-1 text-[14px]">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-ansi-cyan">{activePrompt.version_name}</span>
-              <span className="text-[12px] text-term-faint">
+              <span className="text-[13px] text-term-faint">
                 {formatTimestamp(activePrompt.created_at)}
               </span>
             </div>
-            <p className="text-[12px] text-term-dim">
+            <p className="text-[13px] text-term-dim">
               built from {activePrompt.created_from_corrections_count} correction
-              {activePrompt.created_from_corrections_count === 1 ? '' : 's'} ·{' '}
-              {promptCount} version{promptCount === 1 ? '' : 's'} total
+              {activePrompt.created_from_corrections_count === 1 ? '' : 's'}
             </p>
 
             <button
               onClick={() => setShowPrompt((v) => !v)}
-              className="text-[12px] text-term-dim underline-offset-2 hover:text-ansi-cyan hover:underline"
+              className="text-[13px] text-term-dim underline-offset-2 hover:text-ansi-cyan hover:underline"
             >
               {showPrompt ? '▾ hide prompt text' : '▸ view prompt text'}
             </button>
 
             {showPrompt && (
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap border border-term-line bg-term-bg p-2 text-[12px] leading-relaxed text-term-dim">
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap border border-term-line bg-term-bg p-2 text-[13px] leading-relaxed text-term-dim">
                 {activePrompt.prompt_text}
               </pre>
             )}
@@ -95,14 +91,6 @@ export default function ControlPanel({
         >
           improve prompt
         </Button>
-        <p className="text-[12px] leading-relaxed text-term-faint">
-          <span># </span>
-          {corrections === 0
-            ? 'save at least one correction to enable this'
-            : `builds a new version from ${corrections} saved correction${
-                corrections === 1 ? '' : 's'
-              }`}
-        </p>
       </section>
 
       <section className="space-y-2">
@@ -112,7 +100,7 @@ export default function ControlPanel({
         </Button>
         {evaluating && (
           <div className="space-y-1">
-            <div className="flex items-baseline justify-between gap-2 text-[12px]">
+            <div className="flex items-baseline justify-between gap-2 text-[13px]">
               <span className="text-term-dim">
                 {evalProgress
                   ? `scoring ${evalProgress.completed} / ${evalProgress.total}`
@@ -141,23 +129,6 @@ export default function ControlPanel({
           </div>
         )}
         <MetricsPanel evaluation={evaluation} />
-      </section>
-
-      <section className="space-y-2">
-        <Rule>demo controls</Rule>
-        <Button
-          variant="danger"
-          className="w-full"
-          loading={resetting}
-          disabled={resetDisabled}
-          onClick={onReset}
-        >
-          reset demo
-        </Button>
-        <p className="text-[12px] leading-relaxed text-term-faint">
-          <span># </span>
-          type RESET in the confirmation dialog to restore the baseline
-        </p>
       </section>
     </aside>
   )
