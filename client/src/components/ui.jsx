@@ -60,7 +60,7 @@ export function Button({
   return (
     <button
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-1.5 border px-2.5 py-1
+      className={`inline-flex cursor-pointer items-center justify-center gap-1.5 border px-2.5 py-1
         text-[14px] transition-colors duration-75
         disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent
         disabled:hover:text-inherit disabled:hover:border-term-line
@@ -161,7 +161,7 @@ export function Toast({ toast, onDismiss }) {
       <button
         onClick={onDismiss}
         aria-label="Dismiss"
-        className="shrink-0 text-term-faint hover:text-term-fg"
+        className="shrink-0 cursor-pointer text-term-faint hover:text-term-fg"
       >
         ✕
       </button>

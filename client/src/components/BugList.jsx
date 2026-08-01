@@ -72,7 +72,7 @@ export default function BugList({
                 <button
                   onClick={() => onSelect(bug.id)}
                   aria-current={selected ? 'true' : undefined}
-                  className={`flex w-full gap-1.5 border-l-2 py-1.5 pr-3 text-left transition-colors duration-75
+                  className={`flex w-full cursor-pointer gap-1.5 border-l-2 py-1.5 pr-3 text-left transition-colors duration-75
                     ${
                       selected
                         ? 'border-ansi-cyan bg-term-sel/40'

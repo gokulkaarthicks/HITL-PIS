@@ -62,7 +62,7 @@ export default function ControlPanel({
 
             <button
               onClick={() => setShowPrompt((v) => !v)}
-              className="text-[13px] text-term-dim underline-offset-2 hover:text-ansi-cyan hover:underline"
+              className="cursor-pointer text-[13px] text-term-dim underline-offset-2 hover:text-ansi-cyan hover:underline"
             >
               {showPrompt ? '▾ hide prompt text' : '▸ view prompt text'}
             </button>

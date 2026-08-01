@@ -289,7 +289,7 @@ export default function App() {
           title="Reset demo"
           disabled={resetDisabled || resetting}
           onClick={() => setResetOpen(true)}
-          className="inline-flex h-7 w-7 items-center justify-center text-[21px] text-ansi-green
+          className="inline-flex h-7 w-7 cursor-pointer items-center justify-center text-[21px] text-ansi-green
             transition-colors duration-75 hover:text-ansi-green/80
             disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-ansi-green
             focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1

@@ -43,7 +43,7 @@ export default function ResetDemoDialog({ open, submitting, onClose, onSubmit })
             onClick={onClose}
             disabled={submitting}
             aria-label="Close"
-            className="text-term-faint hover:text-term-fg disabled:opacity-40"
+            className="cursor-pointer text-term-faint hover:text-term-fg disabled:cursor-not-allowed disabled:opacity-40"
           >
             ✕
           </button>

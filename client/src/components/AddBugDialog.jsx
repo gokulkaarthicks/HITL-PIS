@@ -45,7 +45,7 @@ export default function AddBugDialog({ open, submitting, onClose, onSubmit }) {
           <button
             onClick={onClose}
             aria-label="Close"
-            className="text-term-faint hover:text-term-fg"
+            className="cursor-pointer text-term-faint hover:text-term-fg"
           >
             ✕
           </button>
