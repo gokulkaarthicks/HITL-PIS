@@ -13,6 +13,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         // 127.0.0.1 rather than localhost: on machines where localhost resolves
