@@ -13,9 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
-import httpx
-
 from .config import settings
+from .http_client import OutboundHTTPClient, OutboundHTTPError
 
 Row = dict[str, Any]
 
@@ -32,8 +31,8 @@ class SupabaseError(RuntimeError):
 class SupabaseClient:
     def __init__(self, url: str, service_key: str) -> None:
         self._rest_url = f"{url}/rest/v1"
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0),
+        self._client = OutboundHTTPClient(
+            timeout=30.0,
             headers={
                 "apikey": service_key,
                 "Authorization": f"Bearer {service_key}",
@@ -54,13 +53,16 @@ class SupabaseClient:
         prefer: str | None = None,
     ) -> list[Row]:
         headers = {"Prefer": prefer} if prefer else None
-        response = await self._client.request(
-            method,
-            f"{self._rest_url}/{table}",
-            params=params,
-            json=json,
-            headers=headers,
-        )
+        try:
+            response = await self._client.request(
+                method,
+                f"{self._rest_url}/{table}",
+                params=params,
+                json=json,
+                headers=headers,
+            )
+        except OutboundHTTPError as exc:
+            raise SupabaseError(502, f"Could not reach Supabase: {exc}") from exc
         if response.status_code >= 400:
             raise SupabaseError(response.status_code, response.text)
         if not response.content:
@@ -121,7 +123,7 @@ class SupabaseClient:
 _client: SupabaseClient | None = None
 
 
-def get_db() -> SupabaseClient:
+async def get_db() -> SupabaseClient:
     """Return the process-wide client, creating it on first use."""
     global _client
     if _client is None:

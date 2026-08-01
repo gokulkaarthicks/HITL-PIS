@@ -7,12 +7,12 @@ import json
 import logging
 from typing import Any, AsyncIterator
 
-import httpx
 from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 
 from ..db import SupabaseClient, get_db
 from ..evaluation import get_latest_evaluation, run_evaluation
+from ..http_client import AsyncHTTPClient
 from ..schemas import EvalComparison
 from .bugs import get_llm
 
@@ -35,7 +35,7 @@ async def list_examples(db: SupabaseClient = Depends(get_db)) -> list[dict[str, 
 async def post_run(
     force: bool = Query(default=False, description=FORCE_DESCRIPTION),
     db: SupabaseClient = Depends(get_db),
-    llm_client: httpx.AsyncClient = Depends(get_llm),
+    llm_client: AsyncHTTPClient = Depends(get_llm),
 ) -> EvalComparison:
     return await run_evaluation(db, llm_client, force=force)
 
@@ -44,7 +44,7 @@ async def post_run(
 async def post_run_stream(
     force: bool = Query(default=False, description=FORCE_DESCRIPTION),
     db: SupabaseClient = Depends(get_db),
-    llm_client: httpx.AsyncClient = Depends(get_llm),
+    llm_client: AsyncHTTPClient = Depends(get_llm),
 ) -> StreamingResponse:
     """Same evaluation as POST /eval/run, streamed as newline-delimited JSON.
 

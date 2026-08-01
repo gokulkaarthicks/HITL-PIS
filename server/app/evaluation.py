@@ -15,8 +15,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable
 
-import httpx
-
 from .config import settings
 from .db import SupabaseClient
 from .grading import (
@@ -27,6 +25,7 @@ from .grading import (
     count_regressions,
     grade_example,
 )
+from .http_client import AsyncHTTPClient
 from .llm import LLMError, classify
 from .prompt_service import get_active_prompt, get_previous_prompt
 from .schemas import EvalComparison, EvalRunSummary, Triage
@@ -66,7 +65,7 @@ class _Progress:
 
 
 async def _predict_all(
-    llm_client: httpx.AsyncClient,
+    llm_client: AsyncHTTPClient,
     examples: list[Row],
     prompt_text: str,
     *,
@@ -237,7 +236,7 @@ def _comparison(
 # ---------------------------------------------------------------------------
 async def run_evaluation(
     db: SupabaseClient,
-    llm_client: httpx.AsyncClient,
+    llm_client: AsyncHTTPClient,
     *,
     force: bool = False,
     on_progress: ProgressCallback | None = None,

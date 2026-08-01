@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from .config import settings
+from .http_client import AsyncHTTPClient, OutboundHTTPClient, OutboundHTTPError
 from .schemas import COMPONENTS, SEVERITIES, Triage
 
 TRIAGE_JSON_SCHEMA: dict[str, Any] = {
@@ -58,7 +59,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 
 
 async def classify(
-    client: httpx.AsyncClient, report_text: str, prompt_text: str
+    client: AsyncHTTPClient, report_text: str, prompt_text: str
 ) -> Triage:
     """Run one triage call. Raises LLMError on any failure."""
     if not settings.openrouter_api_key:
@@ -84,7 +85,7 @@ async def classify(
             headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
             timeout=settings.llm_timeout_seconds,
         )
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, OutboundHTTPError) as exc:
         raise LLMError(f"Could not reach OpenRouter: {exc}") from exc
 
     if response.status_code >= 400:
@@ -108,5 +109,5 @@ async def classify(
         raise LLMError(f"Model output failed validation: {exc}") from exc
 
 
-def build_llm_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=httpx.Timeout(settings.llm_timeout_seconds))
+def build_llm_client() -> OutboundHTTPClient:
+    return OutboundHTTPClient(timeout=settings.llm_timeout_seconds)

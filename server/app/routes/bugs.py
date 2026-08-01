@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..db import SupabaseClient, get_db
+from ..http_client import AsyncHTTPClient
 from ..llm import classify
 from ..prompt_service import get_active_prompt
 from ..schemas import CorrectionRequest, CreateBugRequest, RunRequest
@@ -26,7 +26,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def get_llm(request: Request) -> httpx.AsyncClient:
+async def get_llm(request: Request) -> AsyncHTTPClient:
     return request.app.state.llm_client
 
 
@@ -64,7 +64,7 @@ async def run_llm(
     bug_id: str,
     payload: RunRequest | None = None,
     db: SupabaseClient = Depends(get_db),
-    llm_client: httpx.AsyncClient = Depends(get_llm),
+    llm_client: AsyncHTTPClient = Depends(get_llm),
 ) -> dict[str, Any]:
     """Classify one bug report with the currently active prompt."""
     bug = await _load_bug(db, bug_id)
