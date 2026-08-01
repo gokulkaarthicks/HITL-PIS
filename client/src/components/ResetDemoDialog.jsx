@@ -37,7 +37,7 @@ export default function ResetDemoDialog({ open, submitting, onClose, onSubmit })
         className="w-full max-w-lg border border-ansi-red/50 bg-term-panel shadow-2xl"
       >
         <div className="flex items-center gap-2 border-b border-term-line px-3 py-1.5">
-          <span className="text-[13px] text-ansi-red">reset-demo</span>
+          <span className="text-[14px] text-ansi-red">reset-demo</span>
           <span className="flex-1" />
           <button
             onClick={onClose}
@@ -56,7 +56,7 @@ export default function ResetDemoDialog({ open, submitting, onClose, onSubmit })
             if (confirmed) onSubmit()
           }}
         >
-          <p className="text-[12px] leading-relaxed text-term-dim">
+          <p className="text-[13px] leading-relaxed text-term-dim">
             Restores the 93 seeded reports to <span className="text-term-fg">not run</span>,
             deletes manual reports, corrections, improved prompts, and evaluation
             history, then reactivates <span className="text-ansi-cyan">v1-baseline</span>.

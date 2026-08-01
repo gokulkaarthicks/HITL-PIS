@@ -1,5 +1,7 @@
 # Human-in-the-Loop Prompt Improvement System
 
+**Production:** [frontend](https://hitl-pis.pages.dev/) · [docs](https://hitl-pis.pages.dev/docs) · [backend](https://hitl-prompt-improvement-api.kaarthickgokul.workers.dev/) · [health check](https://hitl-prompt-improvement-api.kaarthickgokul.workers.dev/health)
+
 An LLM triages bug reports into structured JSON. A human reviewer corrects the
 output. The corrections are stored, used to build a new prompt version, and a
 deterministic evaluation proves whether the new prompt is actually better -
@@ -84,7 +86,7 @@ gain and not recall.
 │   │   ├── prompt_service.py  prompt version assembly
 │   │   ├── evaluation.py      baseline vs active orchestration
 │   │   └── routes/            health, bugs, prompts, evaluation
-│   └── tests/                 42 unit + loop tests
+│   └── tests/                 53 unit + loop tests
 └── supabase/
     ├── schema.sql             tables, constraints, indexes, RLS
     └── seed.sql               baseline prompt + 111 bug reports
@@ -292,6 +294,12 @@ Errors are returned as `{"detail": "..."}`: `409` for an invalid state (no
 corrections yet, no examples seeded), `502` for an upstream Supabase/OpenRouter
 failure, `404` for a missing bug report.
 
+The production Worker applies Cloudflare-native per-visitor limits only to LLM
+entry points: 120 individual report classifications per minute and three
+evaluation starts per minute. The first threshold exceeds the complete
+93-report demo run; the second contains evaluation fan-out without affecting a
+normal interview flow. Rate-limited calls return `429` with `Retry-After: 60`.
+
 ### Resetting the public demo
 
 The **reset demo** control restores the initial interview state transactionally:
@@ -313,7 +321,7 @@ its state.
 cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
 ```
 
-51 tests covering the parts where correctness actually matters:
+53 tests covering the parts where correctness actually matters:
 
 - **`test_grading.py`** - exact-match scoring, case/whitespace normalization,
   failed LLM calls counting as incorrect, per-axis accuracy, regression and

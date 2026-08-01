@@ -37,7 +37,7 @@ export default function MetricsPanel({ evaluation }) {
     regressions > 0 ? 'text-ansi-yellow' : 'text-ansi-green'
 
   return (
-    <div className="space-y-1 text-[13px]">
+    <div className="space-y-1 text-[14px]">
       <Row
         label={`previous  ${previous.version_name}`}
         value={formatPercent(previous.overall_accuracy)}
@@ -95,7 +95,7 @@ export default function MetricsPanel({ evaluation }) {
       />
 
       {unchanged && (
-        <p className="pt-2 text-[12px] leading-relaxed text-term-faint">
+        <p className="pt-2 text-[13px] leading-relaxed text-term-faint">
           <span># </span>
           only one prompt version exists, so both rows show the same score.
           improve the prompt, then re-run to get a real comparison.
@@ -104,7 +104,7 @@ export default function MetricsPanel({ evaluation }) {
 
       {/* A reused score must never read as freshly measured. */}
       {previousIsCached && !unchanged && (
-        <p className="pt-2 text-[12px] leading-relaxed text-term-faint">
+        <p className="pt-2 text-[13px] leading-relaxed text-term-faint">
           <span># </span>
           previous row reused from its run at{' '}
           {formatTimestamp(previous.created_at)} - not re-scored
