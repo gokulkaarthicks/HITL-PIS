@@ -1,8 +1,13 @@
+from pathlib import Path
+
 import httpx
 import pytest
 
 from app.db import get_db
 from app.main import app
+
+
+SCHEMA_SQL = Path(__file__).parents[2] / "supabase" / "schema.sql"
 
 
 class FakeResetDB:
@@ -60,3 +65,13 @@ async def test_reset_calls_atomic_database_rpc_after_confirmation() -> None:
     assert response.status_code == 200
     assert response.json()["seeded_bug_count"] == 93
     assert db.calls == [("reset_demo", None)]
+
+
+def test_reset_rpc_uses_safe_full_table_deletes() -> None:
+    schema = SCHEMA_SQL.read_text()
+    reset_function = schema.split(
+        "create or replace function public.reset_demo()", 1
+    )[1].split("revoke all on function public.reset_demo()", 1)[0]
+
+    assert "delete from evaluation_runs where true;" in reset_function
+    assert "delete from review_events where true;" in reset_function

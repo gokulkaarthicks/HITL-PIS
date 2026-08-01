@@ -209,8 +209,10 @@ begin
         raise exception 'Cannot reset: v1-baseline does not exist';
     end if;
 
-    delete from evaluation_runs;
-    delete from review_events;
+    -- Keep an explicit predicate so this works when Supabase's safe-update
+    -- guard rejects full-table DELETE statements without a WHERE clause.
+    delete from evaluation_runs where true;
+    delete from review_events where true;
 
     delete from bug_reports where source = 'manual';
     get diagnostics deleted_manual_count = row_count;
