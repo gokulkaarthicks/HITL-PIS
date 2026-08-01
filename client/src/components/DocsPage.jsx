@@ -64,7 +64,7 @@ export default function DocsPage() {
         <span className="flex-1" />
         <a
           href="/"
-          className="shrink-0 text-sm font-medium text-ansi-orange hover:text-ansi-orange/80 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ansi-orange"
+          className="shrink-0 text-sm font-medium text-ansi-green hover:text-ansi-green/80 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-ansi-green"
         >
           ← application
         </a>
