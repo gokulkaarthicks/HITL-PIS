@@ -46,7 +46,7 @@ function SectionHeading({ children }) {
 
 function PointList({ points }) {
   return (
-    <ul className="list-disc space-y-3 pl-5 text-justify text-[15px] leading-7 text-[#d1d5db]">
+    <ul className="list-disc space-y-3 pl-5 text-justify text-[15px] leading-7 text-term-fg">
       {points.map((point) => (
         <li key={point}>{point}</li>
       ))}
@@ -75,7 +75,7 @@ export default function DocsPage() {
           <h1 className="text-3xl font-semibold tracking-tight text-ansi-green">
             Design
           </h1>
-          <p className="text-justify text-[15px] leading-7 text-[#d1d5db]">
+          <p className="text-justify text-[15px] leading-7 text-term-fg">
             How the review → improve → measure loop works, what was traded away,
             and what would change with more time.
           </p>
@@ -83,7 +83,7 @@ export default function DocsPage() {
 
         <section>
           <SectionHeading>loop</SectionHeading>
-          <p className="text-justify text-[15px] leading-7 text-[#d1d5db]">
+          <p className="text-justify text-[15px] leading-7 text-term-fg">
             bug report → LLM triage → human correction → candidate prompt →
             held-out evaluation → activate or reject
           </p>

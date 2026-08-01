@@ -6,10 +6,9 @@
 /*
  * iTerm2-inspired terminal theme.
  *
- * Colours are the standard ANSI 16-colour set (bright variants, which read
- * better than the dim originals against a near-black background). Keeping the
- * palette to real terminal colours preserves the terminal character while
- * Inter keeps the dense interface readable.
+ * Deep charcoal surfaces and warm off-white text, with the original vivid
+ * terminal green as the single strong interface accent. Layout and component
+ * styling remain unchanged; this file only defines the shared colour system.
  */
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -17,24 +16,24 @@
 
   /* surfaces */
   --color-term-bg: #101010;
-  --color-term-panel: #151515;
-  --color-term-raise: #1c1c1c;
-  --color-term-line: #2b2b2b;
-  --color-term-sel: #23324d;
+  --color-term-panel: #141414;
+  --color-term-raise: #1d1d1d;
+  --color-term-line: #2a2a2a;
+  --color-term-sel: #202720;
 
   /* text */
-  --color-term-fg: #c7c7c7;
-  --color-term-dim: #6e6e6e;
-  --color-term-faint: #454545;
+  --color-term-fg: #e2dedb;
+  --color-term-dim: #969390;
+  --color-term-faint: #5b5a58;
 
   /* ANSI */
-  --color-ansi-red: #ff6e67;
+  --color-ansi-red: #c97972;
   --color-ansi-green: #5ffa68;
-  --color-ansi-yellow: #fffc67;
-  --color-ansi-orange: #ffa657;
-  --color-ansi-blue: #6871ff;
-  --color-ansi-magenta: #ff77ff;
-  --color-ansi-cyan: #60fdff;
+  --color-ansi-yellow: #b8aa72;
+  --color-ansi-orange: #b38b70;
+  --color-ansi-blue: #969390;
+  --color-ansi-magenta: #969390;
+  --color-ansi-cyan: #5ffa68;
 }
 
 :root {
@@ -57,20 +56,20 @@ body {
 
 ::selection {
   background: var(--color-term-sel);
-  color: #ffffff;
+  color: var(--color-term-fg);
 }
 
 /* Thin terminal-style scrollbars. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #333333 transparent;
+  scrollbar-color: var(--color-term-line) transparent;
 }
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #333333;
+  background: var(--color-term-line);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

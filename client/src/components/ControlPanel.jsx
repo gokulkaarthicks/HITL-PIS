@@ -109,7 +109,7 @@ export default function ControlPanel({
           }
           onClick={onImprove}
         >
-          {candidate ? 'candidate waiting' : 'build candidate'}
+          {candidate ? 'candidate waiting' : 'improve prompt'}
         </Button>
       </section>
 

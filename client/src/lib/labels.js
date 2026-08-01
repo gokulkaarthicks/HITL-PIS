@@ -11,12 +11,12 @@ export const COMPONENTS = [
   'unknown',
 ]
 
-/* Severity maps onto the ANSI colours a terminal would use for log levels. */
+/* Keep severity legible without turning the interface into a rainbow. */
 export const SEVERITY_STYLES = {
   critical: 'text-ansi-red',
   high: 'text-ansi-orange',
   medium: 'text-ansi-yellow',
-  low: 'text-ansi-blue',
+  low: 'text-term-dim',
 }
 
 export const STATUS_LABELS = {
@@ -27,7 +27,7 @@ export const STATUS_LABELS = {
 
 export const STATUS_STYLES = {
   new: 'text-term-faint',
-  llm_run: 'text-ansi-cyan',
+  llm_run: 'text-ansi-green',
   reviewed: 'text-ansi-green',
 }
 

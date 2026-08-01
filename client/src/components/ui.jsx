@@ -36,13 +36,13 @@ export function Badge({ children, className = 'text-term-dim' }) {
 
 const BUTTON_VARIANTS = {
   primary:
-    'text-ansi-green border-ansi-green/40 hover:bg-ansi-green hover:text-term-bg hover:border-ansi-green',
+    'text-ansi-green border-ansi-green/40 hover:bg-term-raise hover:border-ansi-green/70',
   secondary:
-    'text-term-fg border-term-line hover:bg-term-fg hover:text-term-bg hover:border-term-fg',
+    'text-term-fg border-term-line hover:bg-term-raise hover:border-term-dim',
   ghost:
     'text-term-dim border-transparent hover:text-term-fg hover:border-term-line',
   danger:
-    'text-ansi-red border-ansi-red/40 hover:bg-ansi-red hover:text-term-bg hover:border-ansi-red',
+    'text-ansi-red border-ansi-red/40 hover:bg-ansi-red/10 hover:border-ansi-red/70',
 }
 
 /**
@@ -65,7 +65,7 @@ export function Button({
         disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent
         disabled:hover:text-inherit disabled:hover:border-term-line
         focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1
-        focus-visible:outline-ansi-cyan
+        focus-visible:outline-ansi-green
         ${BUTTON_VARIANTS[variant]} ${className}`}
       {...props}
     >
@@ -117,7 +117,7 @@ export function Field({ label, hint, children }) {
 
 const CONTROL =
   'w-full border border-term-line bg-term-bg px-2 py-1.5 text-[15px] text-term-fg ' +
-  'focus:border-ansi-cyan focus:outline-none'
+  'focus:border-ansi-green focus:outline-none'
 
 export function Select({ options, ...props }) {
   return (
