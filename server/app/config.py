@@ -70,7 +70,9 @@ class Settings:
         ).rstrip("/")
     )
     openrouter_model: str = field(
-        default_factory=lambda: _env("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
+        default_factory=lambda: _env(
+            "OPENROUTER_MODEL", "deepseek/deepseek-v4-flash"
+        )
     )
 
     # Deterministic decoding so that a rerun of the same evaluation on the same

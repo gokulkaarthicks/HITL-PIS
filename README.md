@@ -18,7 +18,7 @@ bug report ──> LLM triage ──> human correction ──> stored
 ```
 
 **Stack:** React + Vite + Tailwind · FastAPI · Supabase Postgres · OpenRouter
-(`openai/gpt-oss-120b:free` by default).
+(`deepseek/deepseek-v4-flash` by default).
 
 ---
 
@@ -150,7 +150,7 @@ files are committed. **No key of any kind belongs in the repository.**
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | - | Server-side only. Bypasses RLS; must never reach the browser. |
 | `OPENROUTER_API_KEY` | yes | - | From openrouter.ai |
 | `OPENROUTER_BASE_URL` | no | `https://openrouter.ai/api/v1` | |
-| `OPENROUTER_MODEL` | no | `openai/gpt-oss-120b:free` | Fixed free model with structured-output support. |
+| `OPENROUTER_MODEL` | no | `deepseek/deepseek-v4-flash` | Production model used for triage and evaluation. |
 | `LLM_TEMPERATURE` | no | `0` | Kept at 0 so evaluation reruns are comparable. |
 | `LLM_SEED` | no | `7` | Same reason. |
 | `LLM_TIMEOUT_SECONDS` | no | `25` | Sets the worst-case evaluation duration, not the typical one. |

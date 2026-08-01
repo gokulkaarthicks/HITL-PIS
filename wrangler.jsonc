@@ -25,7 +25,7 @@
   },
   "vars": {
     "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-    "OPENROUTER_MODEL": "openai/gpt-oss-120b:free",
+    "OPENROUTER_MODEL": "deepseek/deepseek-v4-flash",
     "LLM_TEMPERATURE": "0",
     "LLM_SEED": "7",
     "LLM_TIMEOUT_SECONDS": "25",
