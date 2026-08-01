@@ -1,0 +1,46 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hitl-prompt-improvement-api",
+  "main": "cloudflare_worker/worker.py",
+  "compatibility_date": "2026-07-31",
+  "compatibility_flags": [
+    "python_workers",
+    "python_dedicated_snapshot"
+  ],
+  "build": {
+    "command": "python3 scripts/prepare_cloudflare_worker.py",
+    "watch_dir": [
+      "server/app",
+      "cloudflare_worker/worker.py",
+      "scripts/prepare_cloudflare_worker.py"
+    ]
+  },
+  "python_modules": {
+    "exclude": [
+      "**/*.pyc",
+      "**/__pycache__/**",
+      "**/tests/**",
+      "**/test_*.py"
+    ]
+  },
+  "vars": {
+    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+    "OPENROUTER_MODEL": "openai/gpt-oss-120b:free",
+    "LLM_TEMPERATURE": "0",
+    "LLM_SEED": "7",
+    "LLM_TIMEOUT_SECONDS": "25",
+    "EVAL_CONCURRENCY": "4",
+    "MAX_FEW_SHOT_EXAMPLES": "6",
+    "CORS_ALLOW_ORIGINS": "http://localhost:5173,https://YOUR-PROJECT.pages.dev"
+  },
+  "secrets": {
+    "required": [
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "OPENROUTER_API_KEY"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

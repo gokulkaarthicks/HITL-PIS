@@ -1,0 +1,18 @@
+[project]
+name = "hitl-prompt-improvement-worker"
+version = "1.0.0"
+description = "Cloudflare Python Worker for the HITL prompt improvement API"
+requires-python = ">=3.12"
+dependencies = [
+    # Cloudflare resolves these against its current Pyodide wheel index.
+    # Local CPython remains reproducible through server/requirements.txt.
+    "fastapi",
+    "httpx",
+    "pydantic",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+    "workers-runtime-sdk",
+]

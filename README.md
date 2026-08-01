@@ -18,7 +18,7 @@ bug report ──> LLM triage ──> human correction ──> stored
 ```
 
 **Stack:** React + Vite + Tailwind · FastAPI · Supabase Postgres · OpenRouter
-(`deepseek/deepseek-v4-flash`).
+(`openai/gpt-oss-120b:free` by default).
 
 ---
 
@@ -150,7 +150,7 @@ files are committed. **No key of any kind belongs in the repository.**
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | - | Server-side only. Bypasses RLS; must never reach the browser. |
 | `OPENROUTER_API_KEY` | yes | - | From openrouter.ai |
 | `OPENROUTER_BASE_URL` | no | `https://openrouter.ai/api/v1` | |
-| `OPENROUTER_MODEL` | no | `deepseek/deepseek-v4-flash` | |
+| `OPENROUTER_MODEL` | no | `openai/gpt-oss-120b:free` | Fixed free model with structured-output support. |
 | `LLM_TEMPERATURE` | no | `0` | Kept at 0 so evaluation reruns are comparable. |
 | `LLM_SEED` | no | `7` | Same reason. |
 | `LLM_TIMEOUT_SECONDS` | no | `25` | Sets the worst-case evaluation duration, not the typical one. |
@@ -299,7 +299,7 @@ failure, `404` for a missing bug report.
 cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
 ```
 
-42 tests covering the parts where correctness actually matters:
+46 tests covering the parts where correctness actually matters:
 
 - **`test_grading.py`** - exact-match scoring, case/whitespace normalization,
   failed LLM calls counting as incorrect, per-axis accuracy, regression and
@@ -310,6 +310,9 @@ cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -
   and a scripted model: both arms scored, a prompt that fixes two cases while
   breaking one reports **both** the gain and the regression, and `/eval/latest`
   reads back the same numbers from stored rows.
+- **`test_config.py` / `test_cors.py`** - Cloudflare runtime bindings override
+  settings safely, malformed optional values retain defaults, and deployed CORS
+  origins are applied without exposing secrets to the frontend.
 
 No test calls a real API, so the suite is fast (~0.1s) and free to run.
 
@@ -339,39 +342,59 @@ backend's secret store only.
 
 ### Backend → Cloudflare Workers (Python)
 
-**Read this before choosing Workers.** Cloudflare's Python Workers run on
-Pyodide, not CPython, and only a curated set of packages is available. FastAPI
-and Pydantic are supported, but **`httpx` is not** - outbound HTTP from a Python
-Worker goes through the JavaScript `fetch` binding.
+The backend has a verified Cloudflare Python Worker entrypoint. FastAPI,
+Pydantic, and `httpx` are resolved against Cloudflare's Pyodide package index;
+local Uvicorn development continues to use `server/requirements.txt`.
 
-This backend isolates all outbound HTTP in exactly two modules -
-`app/db.py` and `app/llm.py` - precisely so that this swap is contained. Porting
-means replacing the `httpx.AsyncClient` calls in those two files with the
-Workers `fetch` binding; no route, service, or scoring code changes.
-
-`wrangler.toml`:
-
-```toml
-name = "hitl-prompt-improvement"
-main = "server/app/main.py"
-compatibility_date = "2025-05-01"
-compatibility_flags = ["python_workers"]
-```
-
-Set secrets with `wrangler secret put SUPABASE_URL` (and the other variables
-from the table above) - never in `wrangler.toml`, which is committed.
-
-**I have not deployed or verified the Workers path.** The application is
-deliberately built to be portable rather than Workers-specific: because it is a
-plain ASGI app whose only I/O is HTTP, it runs unmodified on any container host
-(Fly.io, Render, Railway, Cloud Run):
+Prerequisites: free Cloudflare account, Node.js, and `uv`. From the repository
+root:
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
+uv sync
+uv run pywrangler login
+uv run pywrangler secret put SUPABASE_URL
+uv run pywrangler secret put SUPABASE_SERVICE_ROLE_KEY
+uv run pywrangler secret put OPENROUTER_API_KEY
+uv run pywrangler deploy
 ```
 
-That is the path I would take to production today, and I would revisit Workers
-once the `httpx` shim above is written and tested.
+Each `secret put` command prompts for the value and stores it encrypted in
+Cloudflare. The required secret names are declared in `wrangler.jsonc`, so a
+deployment fails clearly when one is missing. Do not add secret values to that
+file.
+
+After deployment, verify the URL printed by Wrangler:
+
+```bash
+curl https://hitl-prompt-improvement-api.<your-subdomain>.workers.dev/health
+```
+
+For the frontend deployment:
+
+1. Set `VITE_API_BASE_URL` to that Worker URL.
+2. Deploy `client/dist` to Cloudflare Pages using the command above.
+3. Replace `https://YOUR-PROJECT.pages.dev` in `wrangler.jsonc` with the exact
+   Pages URL, then run `uv run pywrangler deploy` once more to apply CORS.
+
+For local Worker testing, create a git-ignored `.dev.vars` in the repository
+root containing the same three secrets, then run:
+
+```bash
+uv run pywrangler dev
+```
+
+The free Workers plan is suitable for this exercise, but it is not unlimited:
+100,000 requests/day, 50 external subrequests per request, 128 MB memory, and
+10 ms CPU time per request. The 18-case two-arm evaluation is intentionally
+below the 50-subrequest ceiling, but the CPU allowance is tight; if Cloudflare
+returns error 1102 during evaluation, the production solution is a queued or
+batched evaluation rather than increasing concurrency.
+
+The default OpenRouter model is also free, but free accounts are limited to 50
+model requests/day. A forced 18-case two-arm evaluation uses 36 of them, so use
+the cached previous arm for normal runs. After changing `OPENROUTER_MODEL`, run
+the evaluation once with `?force=true`; scores cached under another model are
+not comparable.
 
 ---
 
