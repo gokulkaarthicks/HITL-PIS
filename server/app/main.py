@@ -10,8 +10,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from .config import settings
@@ -45,13 +44,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
-    allow_headers=["*"],
-)
+
+@app.middleware("http")
+async def configured_cors(request: Request, call_next):
+    """Apply CORS using settings that may arrive as Worker bindings."""
+    origin = request.headers.get("origin")
+    origin_allowed = origin is not None and origin in settings.allowed_origins
+
+    if request.method == "OPTIONS" and origin is not None:
+        if not origin_allowed:
+            return Response(status_code=400, content="Disallowed CORS origin")
+        response = Response(status_code=204)
+    else:
+        response = await call_next(request)
+
+    if origin_allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
+        requested_headers = request.headers.get("access-control-request-headers")
+        response.headers["Access-Control-Allow-Headers"] = requested_headers or "*"
+        response.headers["Vary"] = "Origin"
+    return response
 
 
 @app.exception_handler(LLMError)
