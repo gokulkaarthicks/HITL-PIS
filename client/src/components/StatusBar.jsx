@@ -39,7 +39,7 @@ export default function StatusBar({
       <span className="text-term-faint">│</span>
 
       <span className="text-term-dim">
-        llm{' '}
+        threads{' '}
         <span className={llmBusy ? 'text-ansi-yellow' : 'text-term-fg'}>
           {llmRunning}/{llmConcurrency}
           {llmQueued > 0 ? ` · ${llmQueued} queued` : ''}
