@@ -210,7 +210,7 @@ export default function App() {
       const created = await api.improvePrompt()
       await refreshPrompts()
       notify(
-        `Created ${created.version_name} from ${created.created_from_corrections_count} corrections. Run an evaluation to compare it.`,
+        `Created candidate ${created.version_name} from ${created.created_from_corrections_count} corrections. The current prompt stays active until evaluation passes.`,
         'success',
       )
     } catch (error) {
@@ -228,14 +228,21 @@ export default function App() {
         setEvalProgress({ completed: event.completed, total: event.total }),
       )
       setEvaluation(result)
-      notify('Evaluation complete.', 'success')
+      await refreshPrompts()
+      if (result.candidate_decision === 'activated') {
+        notify('Candidate passed: positive gain, zero regressions, and is now active.', 'success')
+      } else if (result.candidate_decision === 'rejected') {
+        notify('Candidate rejected: the current prompt remains active.', 'error')
+      } else {
+        notify('Evaluation complete.', 'success')
+      }
     } catch (error) {
       notify(error.message)
     } finally {
       setEvaluating(false)
       setEvalProgress(null)
     }
-  }, [notify])
+  }, [notify, refreshPrompts])
 
   const handleResetDemo = useCallback(
     async () => {

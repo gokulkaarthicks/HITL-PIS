@@ -19,7 +19,8 @@
 -- component. Those are exactly what human corrections will teach later.
 -- ---------------------------------------------------------------------------
 insert into prompt_versions
-    (version_name, prompt_text, is_active, created_from_corrections_count)
+    (version_name, prompt_text, is_active, lifecycle_status,
+     created_from_corrections_count)
 values (
     'v1-baseline',
     'You are a bug report triage assistant. Read the bug report and classify it.
@@ -31,6 +32,7 @@ Return a JSON object with exactly these fields:
 
 Return only the JSON object and nothing else.',
     true,
+    'active',
     0
 )
 on conflict (version_name) do nothing;

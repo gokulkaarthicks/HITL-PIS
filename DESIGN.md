@@ -68,9 +68,11 @@ filter form raises rather than silently matching everything.
 - **`CHECK` constraints for label vocabularies.** An invalid label is rejected
   at write time. Accuracy is computed by string equality, so a stray
   `"Critical"` or `"payment"` would quietly depress every subsequent score.
-- **Partial unique index for the active prompt.** `create unique index …
-  where is_active` makes "two active prompts" unrepresentable rather than
-  merely discouraged. This is why `improve_prompt` deactivates before inserting.
+- **Partial unique indexes for active and candidate prompts.** The database can
+  hold at most one live prompt and one candidate waiting for evaluation.
+- **Transactional candidate resolution.** `resolve_prompt_candidate` verifies
+  that the evaluation control is still live, then activates or rejects the
+  candidate in one database transaction.
 - **RLS on, zero policies.** The service-role key bypasses RLS; nothing else
   reaches these tables. Should an anon key ever be exposed, it grants nothing.
 - **`review_events` is append-only.** `bug_reports` holds current state;
@@ -96,7 +98,9 @@ An improved prompt is assembled from five explicit sections:
 5. **A final execution instruction** - apply the evidence to the incoming report
    independently rather than copying an example mechanically.
 
-The assembled text is written to `prompt_versions.prompt_text` and activated.
+The assembled text is written to `prompt_versions.prompt_text` as an inactive
+candidate. It becomes active only after a positive held-out gain with zero
+regressions.
 `build_improved_prompt_text` is a pure, deterministic function over correction
 rows. Stable operating guidance is code; learned calibration and examples come
 only from stored human review.
@@ -158,13 +162,12 @@ first one improved, and any delta would then be inseparable from judge drift.
 
 ### Two arms, one variable
 
-Every run scores the same held-out examples under both the active prompt and the
-**immediately previous prompt version**, with identical decoding settings
-(`temperature=0`, fixed `seed`, same model). The prompt text is the only thing
-that differs between arms, which is what licenses attributing the delta to the
-prompt.
+Every candidate decision freshly scores the same held-out examples under the
+live prompt and candidate, with identical decoding settings (`temperature=0`,
+fixed `seed`, same model). The prompt text is the only variable, which licenses
+attributing the delta to the candidate.
 
-The control is the previous version rather than a fixed `v1-baseline` because
+The control is the current live version rather than a fixed `v1-baseline` because
 the operationally useful question is "did the last improvement help, and did it
 break anything that worked last round?" - the same question a CI check asks of a
 diff. Comparing every round against v1 answers "how far have we come", which
@@ -185,23 +188,17 @@ Note this is *not* the same thing as `get_baseline_prompt`, which still resolves
 `v1-baseline` by name. That one is the composition root every improved prompt is
 rebuilt from (§2); it no longer has anything to do with the comparison arm.
 
-### Reusing the previous arm
+### Candidate deployment gate
 
-The previous version's prompt text is immutable and decoding is deterministic,
-so its score is a pure function of inputs that have not changed. Re-computing it
-every run was half the LLM calls for a number already stored, so a run now loads
-the previous version's last `evaluation_runs` row and its per-example
-`evaluation_results` instead - cutting an 18-example run from 36 calls to 18.
+Candidate decisions never reuse a cached control arm. Both prompts are scored
+in the same run so a model, seed, or decoding change cannot be mistaken for a
+prompt improvement. The candidate is activated only when overall accuracy is
+strictly higher and the regression count is zero. Otherwise it is retained with
+status `rejected`, and the live prompt remains unchanged.
 
-The reuse is guarded: a cached arm is only accepted if its stored results cover
-exactly the current `evaluation_examples` id set. Adding or removing an example
-changes the denominator, so a score computed over the old set is not comparable.
-
-One staleness mode is undetectable - changing the model, temperature or seed
-makes the cached arm incomparable with no signal in the data. `?force=true`
-re-scores both arms and exists precisely for that case. The API response carries
-`previous_is_cached`, and the UI prints the timestamp the previous arm was
-actually measured, so a reused number never reads as freshly computed.
+The final state transition is a Postgres RPC. It checks that the candidate is
+still pending and that the evaluated control is still active before changing
+either row, preventing concurrent requests from promoting stale work.
 
 ### Metrics, and why regressions are reported separately
 
@@ -278,19 +275,15 @@ LLM output, and marks fields that differ from the model's proposal as `changed`
 | Exact label match | Auditable, deterministic, trivial to verify | No partial credit; ordinal severity treated as categorical |
 | Few-shot from corrections | Legible, cheap, immediate, reversible | Plateaus; context grows with example count |
 | Rebuild from baseline each time | No drift; prompt is a clean function of corrections | Cannot hand-tune an improved prompt and keep it |
-| Previous version as control | Answers "did the last change help, and what did it break?" | Deltas no longer accumulate against a fixed reference; "total progress since v1" is not reported |
-| Reusing the previous arm's stored run | Halves LLM calls and wall-clock per run | A model/seed change silently invalidates it; needs `?force=true` |
+| Live version as candidate control | Tests exactly what would change at deployment | Deltas do not show cumulative progress against v1 |
+| Fresh candidate arms | Comparable evidence and safe activation | Doubles candidate evaluation calls |
 | 18 held-out examples | Fast, cheap runs | ±5.6 points per example; small deltas are noise |
 | No auth | Zero friction for a single-reviewer demo | Unsuitable for real multi-user deployment |
 | Corrections are ground truth | Simple, no adjudication UI | One careless reviewer poisons every later prompt |
 
-The transaction tradeoff is the sharpest. `POST /prompts/improve` deactivates
-the current version and then inserts the new active one as two separate calls.
-The unique index guarantees the database can never *hold* two active prompts, so
-the failure mode is a clean error rather than corruption - but a crash between
-the two calls leaves zero active prompts, which needs a manual fix. In a
-transactional design this would be one `BEGIN … COMMIT`. Section 6 covers the
-fix.
+Prompt creation remains a cheap PostgREST insert, while the safety-critical
+activation is a transactional RPC. This keeps the live prompt unchanged if
+evaluation, persistence, or candidate resolution fails.
 
 ---
 
@@ -298,48 +291,42 @@ fix.
 
 Ordered by what I would do first.
 
-**1. Atomicity for prompt activation.** Move the deactivate-then-insert pair
-into a Postgres function invoked through PostgREST RPC, so activation is one
-atomic call. This closes the "zero active prompts" window and makes
-`/prompts/improve` safe under concurrency.
-
-**2. Authentication and real reviewer identity.** Supabase Auth, with
+**1. Authentication and real reviewer identity.** Supabase Auth, with
 `reviewer_id` becoming a real foreign key and RLS policies replacing the
 service-role key for user-scoped reads. The current `localStorage` id is an
 attribution label and nothing more; it must not be mistaken for a security
 boundary.
 
-**3. A larger, versioned gold set.** 18 examples cannot resolve small effects.
+**2. A larger, versioned gold set.** 18 examples cannot resolve small effects.
 I would target 150–300 examples, labelled by more than one person with
 inter-annotator agreement tracked, and version the set so a change to the
 examples is never confused with a change to the prompt. With that in place,
 report confidence intervals and gate on statistical significance rather than raw
 deltas.
 
-**4. Treat prompt activation as a deploy.** Evaluate a candidate *before* it
-goes live and block activation on "no regressions and a significant gain",
-instead of activating first and measuring afterwards. Keep one-click rollback to
-any earlier version.
+**3. Richer deployment policy and rollback.** Keep one-click rollback to any
+earlier version and, with a larger gold set, require statistical significance in
+addition to the current positive-delta and zero-regression gate.
 
-**5. Background evaluation runs.** At 300 examples an evaluation is 600 LLM
+**4. Background evaluation runs.** At 300 examples an evaluation is 600 LLM
 calls, well past an HTTP request's lifetime. Queue the run, stream progress, and
 persist partial results.
 
-**6. Correction quality controls.** Inter-reviewer agreement, double-review for
+**5. Correction quality controls.** Inter-reviewer agreement, double-review for
 disagreements, and the ability to exclude a correction from prompt building
 without deleting the audit record. Today one careless reviewer silently degrades
 every subsequent prompt.
 
-**7. Ordinal-aware severity metrics.** Adjacent-error weighting or Cohen's
+**6. Ordinal-aware severity metrics.** Adjacent-error weighting or Cohen's
 kappa, reported alongside exact match - `high` for `critical` is a materially
 better mistake than `low` for `critical`, and the current metric cannot say so.
 
-**8. Operational basics.** Structured request logging with correlation ids,
+**7. Operational basics.** Structured request logging with correlation ids,
 per-run token and cost tracking, retry with backoff on 429s (which currently
 score as incorrect and understate a prompt's true accuracy), and alerting on
 regression count.
 
-**9. Beyond few-shot.** Once examples plateau, the next step is retrieval -
+**8. Beyond few-shot.** Once examples plateau, the next step is retrieval -
 select the *k* most similar corrections per report rather than a fixed global
 set - and only then consider fine-tuning, with this evaluation harness as the
 thing that proves it was worth it.

@@ -12,6 +12,10 @@ export default function StatusBar({
 }) {
   const reviewed = bugs.filter((b) => b.status === 'reviewed').length
   const llmBusy = llmRunning > 0 || llmQueued > 0
+  const liveAccuracy =
+    evaluation?.candidate_decision === 'rejected'
+      ? evaluation.previous.overall_accuracy
+      : evaluation?.active.overall_accuracy
 
   return (
     <footer className="flex shrink-0 items-center gap-3 overflow-x-auto border-t border-term-line bg-term-panel px-3 py-1 text-[13px] whitespace-nowrap">
@@ -46,7 +50,7 @@ export default function StatusBar({
       <span className="text-term-dim">
         accuracy{' '}
         <span className="text-term-fg">
-          {evaluation ? formatPercent(evaluation.active.overall_accuracy) : '--'}
+          {liveAccuracy == null ? '--' : formatPercent(liveAccuracy)}
         </span>
       </span>
 
