@@ -1,13 +1,12 @@
-"""Evaluation: score the active prompt against the previous prompt version.
+"""Held-out evaluation and candidate deployment gating.
 
-Both arms run against the same `evaluation_examples` rows with the same decoding
-settings, so the only variable is the prompt text. Scoring is done by
-`grading.py` -- pure Python comparing label strings. No model judges accuracy.
+Candidate decisions freshly score the live prompt and candidate against the
+same `evaluation_examples` with identical decoding settings. A candidate is
+activated only after a positive overall delta with zero regressions.
 
-The previous arm is normally *not* re-scored. Its prompt text is immutable and
-decoding is deterministic (`temperature=0` + fixed seed), so its stored
-per-example results are reused, halving the LLM calls per run. `_is_cache_valid`
-guards the one way that can go wrong silently.
+When no candidate exists, the legacy active-versus-previous comparison remains
+available and may reuse a stored previous arm. Scoring itself is deterministic
+pure Python in `grading.py`; no model judges accuracy.
 """
 
 from __future__ import annotations
@@ -27,7 +26,13 @@ from .grading import (
 )
 from .http_client import AsyncHTTPClient
 from .llm import LLMError, classify
-from .prompt_service import get_active_prompt, get_previous_prompt
+from .prompt_service import (
+    get_active_prompt,
+    get_candidate_prompt,
+    get_previous_prompt,
+    list_prompts,
+    resolve_candidate,
+)
 from .schemas import EvalComparison, EvalRunSummary, Triage
 
 Row = dict[str, Any]
@@ -212,6 +217,7 @@ def _comparison(
     improved_count: int,
     example_count: int,
     previous_is_cached: bool = False,
+    candidate_decision: str | None = None,
 ) -> EvalComparison:
     previous = _summary(previous_run, previous_name)
     active = _summary(active_run, active_name)
@@ -228,6 +234,74 @@ def _comparison(
         # of the two, so this reports when the comparison was actually made.
         evaluated_at=max(previous.created_at, active.created_at),
         previous_is_cached=previous_is_cached,
+        candidate_decision=candidate_decision,
+    )
+
+
+async def _evaluate_candidate(
+    db: SupabaseClient,
+    llm_client: AsyncHTTPClient,
+    examples: list[Row],
+    active: Row,
+    candidate: Row,
+    *,
+    semaphore: asyncio.Semaphore,
+    on_progress: ProgressCallback | None,
+) -> EvalComparison:
+    """Evaluate a candidate against the live prompt, then resolve it atomically.
+
+    Both arms are always scored fresh. A deployment decision must never mix a
+    cached score from another model/configuration with a fresh candidate score.
+    """
+    progress = _Progress(len(examples) * 2, on_progress)
+    active_grades, candidate_grades = await asyncio.gather(
+        _predict_all(
+            llm_client,
+            examples,
+            active["prompt_text"],
+            semaphore=semaphore,
+            arm="current",
+            progress=progress,
+        ),
+        _predict_all(
+            llm_client,
+            examples,
+            candidate["prompt_text"],
+            semaphore=semaphore,
+            arm="candidate",
+            progress=progress,
+        ),
+    )
+
+    active_accuracy = aggregate(active_grades)
+    candidate_accuracy = aggregate(candidate_grades)
+    regressions = count_regressions(active_grades, candidate_grades)
+    improvements = count_improvements(active_grades, candidate_grades)
+    accepted = (
+        candidate_accuracy.overall_accuracy > active_accuracy.overall_accuracy
+        and regressions == 0
+    )
+
+    active_run = await _store_run(db, active["id"], active_grades, active_accuracy, 0)
+    candidate_run = await _store_run(
+        db, candidate["id"], candidate_grades, candidate_accuracy, regressions
+    )
+    await resolve_candidate(
+        db,
+        candidate["id"],
+        active["id"],
+        accept=accepted,
+    )
+
+    decision = "activated" if accepted else "rejected"
+    return _comparison(
+        active_run,
+        active["version_name"],
+        candidate_run,
+        candidate["version_name"],
+        improvements,
+        len(examples),
+        candidate_decision=decision,
     )
 
 
@@ -254,8 +328,20 @@ async def run_evaluation(
         )
 
     active = await get_active_prompt(db)
+    candidate = await get_candidate_prompt(db)
     previous = await get_previous_prompt(db, active)
     semaphore = asyncio.Semaphore(max(1, settings.eval_concurrency))
+
+    if candidate is not None:
+        return await _evaluate_candidate(
+            db,
+            llm_client,
+            examples,
+            active,
+            candidate,
+            semaphore=semaphore,
+            on_progress=on_progress,
+        )
 
     # Fresh install: nothing to compare against. Score once and report it for
     # both sides so the UI shows a real number rather than a fabricated delta.
@@ -356,7 +442,9 @@ async def _improved_count_for_run(
         columns="evaluation_example_id,both_correct",
         filters={"evaluation_run_id": f"eq.{active_run_id}"},
     )
-    previous_map = {r["evaluation_example_id"]: r["both_correct"] for r in previous_rows}
+    previous_map = {
+        r["evaluation_example_id"]: r["both_correct"] for r in previous_rows
+    }
     return sum(
         1
         for r in active_rows
@@ -373,6 +461,50 @@ async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
     schema exactly as specified. Returns None when either arm has never run.
     """
     active = await get_active_prompt(db)
+
+    # Candidate decisions remain visible after reload, including rejected
+    # candidates that never became active.
+    resolved = [
+        row
+        for row in await list_prompts(db)
+        if row.get("evaluation_decision") in {"activated", "rejected"}
+        and row.get("evaluated_against_prompt_id")
+    ]
+    if resolved:
+        candidate = max(
+            resolved,
+            key=lambda row: str(row.get("evaluated_at") or row.get("created_at") or ""),
+        )
+        control = next(
+            (
+                row
+                for row in await list_prompts(db)
+                if row["id"] == candidate["evaluated_against_prompt_id"]
+            ),
+            None,
+        )
+        candidate_run = await _latest_run_for(db, candidate["id"])
+        control_run = (
+            await _latest_run_for(db, control["id"]) if control is not None else None
+        )
+        if (
+            candidate_run is not None
+            and control_run is not None
+            and control is not None
+        ):
+            improved = await _improved_count_for_run(
+                db, control_run["id"], candidate_run["id"]
+            )
+            return _comparison(
+                control_run,
+                control["version_name"],
+                candidate_run,
+                candidate["version_name"],
+                improved,
+                await _example_count(db),
+                candidate_decision=candidate["evaluation_decision"],
+            )
+
     previous = await get_previous_prompt(db, active)
 
     active_run = await _latest_run_for(db, active["id"])

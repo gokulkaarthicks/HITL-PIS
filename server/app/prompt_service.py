@@ -17,7 +17,7 @@ from collections import Counter
 from typing import Any
 
 from .config import settings
-from .db import SupabaseClient
+from .db import SupabaseClient, SupabaseError
 from .grading import normalize_label
 
 BASELINE_VERSION_NAME = "v1-baseline"
@@ -38,6 +38,14 @@ class PromptServiceError(RuntimeError):
     """Raised when prompt state is inconsistent or improvement is not possible."""
 
 
+def is_candidate_schema_missing(exc: SupabaseError) -> bool:
+    """Recognize PostgREST errors from databases that predate candidate gating."""
+    detail = exc.detail.lower()
+    return "lifecycle_status" in detail and (
+        "does not exist" in detail or "schema cache" in detail
+    )
+
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
@@ -52,6 +60,21 @@ async def get_active_prompt(db: SupabaseClient) -> Row:
             "No active prompt version. Did you run supabase/seed.sql?"
         )
     return row
+
+
+async def get_candidate_prompt(db: SupabaseClient) -> Row | None:
+    """Return the single prompt waiting for evaluation, if one exists."""
+    try:
+        return await db.select_one(
+            "prompt_versions", filters={"lifecycle_status": "eq.candidate"}
+        )
+    except SupabaseError as exc:
+        if is_candidate_schema_missing(exc):
+            raise PromptServiceError(
+                "Database upgrade required: apply supabase/schema.sql before "
+                "using candidate prompt evaluation."
+            ) from exc
+        raise
 
 
 async def get_baseline_prompt(db: SupabaseClient) -> Row:
@@ -145,9 +168,7 @@ def _teaching_signal_sort_key(row: Row) -> tuple[int, int, tuple[str, str]]:
     return -changed_axes, -severity_distance, _correction_sort_key(row)
 
 
-def select_few_shot_corrections(
-    corrections: list[Row], limit: int
-) -> list[Row]:
+def select_few_shot_corrections(corrections: list[Row], limit: int) -> list[Row]:
     """Pick which corrections become worked examples.
 
     Only corrections where the human changed the model are eligible. They are
@@ -203,8 +224,8 @@ def summarize_confusions(corrections: list[Row]) -> tuple[list[str], list[str]]:
 
     def render(counter: Counter[tuple[str, str]]) -> list[str]:
         return [
-            f'- Prefer `{now}` over `{was}` in matching cases '
-            f'({count} reviewed {"correction" if count == 1 else "corrections"}).'
+            f"- Prefer `{now}` over `{was}` in matching cases "
+            f"({count} reviewed {'correction' if count == 1 else 'corrections'})."
             for (was, now), count in sorted(
                 counter.items(), key=lambda kv: (-kv[1], kv[0])
             )
@@ -222,8 +243,7 @@ def build_improved_prompt_text(
 
     sections: list[str] = [
         "# Bug report triage operating prompt\n\n"
-        "## Role, task, and output contract\n\n"
-        + baseline_text.strip(),
+        "## Role, task, and output contract\n\n" + baseline_text.strip(),
         DECISION_PROCESS,
     ]
 
@@ -238,8 +258,7 @@ def build_improved_prompt_text(
             "## Calibration from human review\n\n"
             f"This is a deduplicated summary of label changes across "
             f"{len(corrections)} verified reports. Apply a preference only "
-            "when the new report has matching evidence.\n\n"
-            + "\n\n".join(guidance)
+            "when the new report has matching evidence.\n\n" + "\n\n".join(guidance)
         )
 
     if examples:
@@ -263,8 +282,7 @@ def build_improved_prompt_text(
             "## Distinctive human-verified reference cases\n\n"
             "Only high-signal disagreements with distinct outcomes appear here. "
             "They are evidence, not universal rules; match their reasoning only "
-            "when impact and ownership are comparable.\n\n"
-            + "\n\n".join(rendered)
+            "when impact and ownership are comparable.\n\n" + "\n\n".join(rendered)
         )
 
     sections.append(
@@ -291,12 +309,20 @@ async def fetch_corrections(db: SupabaseClient) -> list[Row]:
 
 
 async def improve_prompt(db: SupabaseClient) -> Row:
-    """Create a new active prompt version from stored corrections."""
+    """Create an inactive candidate prompt from stored corrections.
+
+    The candidate must pass held-out evaluation before it can become active.
+    Keeping the current prompt live closes the unsafe window where an untested
+    prompt previously served production traffic.
+    """
+    if await get_candidate_prompt(db) is not None:
+        raise PromptServiceError(
+            "A candidate prompt is already waiting for evaluation. Run the "
+            "evaluation before creating another candidate."
+        )
     corrections = await fetch_corrections(db)
     usable = [
-        row
-        for row in corrections
-        if all(_label_pair(row.get("human_corrected_json")))
+        row for row in corrections if all(_label_pair(row.get("human_corrected_json")))
     ]
     if not usable:
         raise PromptServiceError(
@@ -311,20 +337,37 @@ async def improve_prompt(db: SupabaseClient) -> Row:
         baseline["prompt_text"], usable, settings.max_few_shot_examples
     )
 
-    # Deactivate first: the partial unique index allows only one active row, so
-    # inserting before clearing would violate it.
-    await db.update(
-        "prompt_versions", {"is_active": False}, filters={"is_active": "is.true"}
-    )
     created = await db.insert(
         "prompt_versions",
         {
             "version_name": next_version_name(existing),
             "prompt_text": prompt_text,
-            "is_active": True,
+            "is_active": False,
+            "lifecycle_status": "candidate",
             "created_from_corrections_count": len(usable),
         },
     )
     if not created:
-        raise PromptServiceError("Failed to create the new prompt version.")
+        raise PromptServiceError("Failed to create the candidate prompt version.")
     return created[0]
+
+
+async def resolve_candidate(
+    db: SupabaseClient,
+    candidate_id: str,
+    evaluated_against_prompt_id: str,
+    *,
+    accept: bool,
+) -> Row:
+    """Atomically activate or reject a candidate after evaluation."""
+    rows = await db.rpc(
+        "resolve_prompt_candidate",
+        {
+            "p_candidate_id": candidate_id,
+            "p_evaluated_against_prompt_id": evaluated_against_prompt_id,
+            "p_accept": accept,
+        },
+    )
+    if not rows:
+        raise PromptServiceError("Failed to resolve the evaluated candidate prompt.")
+    return rows[0]

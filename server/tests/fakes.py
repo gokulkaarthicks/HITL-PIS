@@ -99,3 +99,42 @@ class FakeSupabase:
                 row.update(values)
                 updated.append(dict(row))
         return updated
+
+    async def rpc(
+        self, function_name: str, arguments: dict[str, Any] | None = None
+    ) -> list[Row]:
+        if function_name != "resolve_prompt_candidate" or arguments is None:
+            raise AssertionError(f"FakeSupabase does not support RPC {function_name!r}")
+
+        candidate_id = arguments["p_candidate_id"]
+        control_id = arguments["p_evaluated_against_prompt_id"]
+        accept = arguments["p_accept"]
+        candidate = next(
+            row
+            for row in self.tables["prompt_versions"]
+            if row["id"] == candidate_id and row.get("lifecycle_status") == "candidate"
+        )
+        control = next(
+            row
+            for row in self.tables["prompt_versions"]
+            if row["id"] == control_id and row.get("is_active")
+        )
+
+        if accept:
+            control.update(is_active=False, lifecycle_status="superseded")
+            candidate.update(
+                is_active=True,
+                lifecycle_status="active",
+                evaluation_decision="activated",
+            )
+        else:
+            candidate.update(
+                is_active=False,
+                lifecycle_status="rejected",
+                evaluation_decision="rejected",
+            )
+        candidate.update(
+            evaluated_against_prompt_id=control_id,
+            evaluated_at=self._next_timestamp(),
+        )
+        return [dict(candidate)]

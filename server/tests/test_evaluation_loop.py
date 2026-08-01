@@ -18,23 +18,43 @@ from tests.fakes import FakeSupabase
 IMPROVED_MARKER = "Calibration from human review"
 
 EXAMPLES = [
-    {"id": "ex1", "report_text": "checkout down",  "expected_severity": "critical", "expected_component": "payments"},
-    {"id": "ex2", "report_text": "reset broken",   "expected_severity": "high",     "expected_component": "auth"},
-    {"id": "ex3", "report_text": "button shifted", "expected_severity": "low",      "expected_component": "frontend"},
-    {"id": "ex4", "report_text": "etl drops rows", "expected_severity": "high",     "expected_component": "database"},
+    {
+        "id": "ex1",
+        "report_text": "checkout down",
+        "expected_severity": "critical",
+        "expected_component": "payments",
+    },
+    {
+        "id": "ex2",
+        "report_text": "reset broken",
+        "expected_severity": "high",
+        "expected_component": "auth",
+    },
+    {
+        "id": "ex3",
+        "report_text": "button shifted",
+        "expected_severity": "low",
+        "expected_component": "frontend",
+    },
+    {
+        "id": "ex4",
+        "report_text": "etl drops rows",
+        "expected_severity": "high",
+        "expected_component": "database",
+    },
 ]
 
 # The older prompt gets ex3 right only. The improved prompt fixes ex1 and ex2
 # but breaks ex3 -- a real accuracy gain that still carries one regression.
 BASELINE_PREDICTIONS = {
-    "checkout down":  ("high", "backend"),
-    "reset broken":   ("medium", "backend"),
+    "checkout down": ("high", "backend"),
+    "reset broken": ("medium", "backend"),
     "button shifted": ("low", "frontend"),
     "etl drops rows": ("medium", "backend"),
 }
 IMPROVED_PREDICTIONS = {
-    "checkout down":  ("critical", "payments"),
-    "reset broken":   ("high", "auth"),
+    "checkout down": ("critical", "payments"),
+    "reset broken": ("high", "auth"),
     "button shifted": ("medium", "frontend"),
     "etl drops rows": ("medium", "backend"),
 }
@@ -72,6 +92,36 @@ def make_db(with_improved_prompt: bool) -> FakeSupabase:
     )
 
 
+def make_candidate_db() -> FakeSupabase:
+    return FakeSupabase(
+        {
+            "prompt_versions": [
+                {
+                    "id": "p1",
+                    "version_name": "v1-baseline",
+                    "prompt_text": "baseline prompt",
+                    "is_active": True,
+                    "lifecycle_status": "active",
+                    "created_from_corrections_count": 0,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "id": "p2",
+                    "version_name": "v2-improved",
+                    "prompt_text": f"baseline prompt\n\n## {IMPROVED_MARKER}\n...",
+                    "is_active": False,
+                    "lifecycle_status": "candidate",
+                    "created_from_corrections_count": 3,
+                    "created_at": "2026-02-01T00:00:00+00:00",
+                },
+            ],
+            "evaluation_examples": [dict(e) for e in EXAMPLES],
+            "evaluation_runs": [],
+            "evaluation_results": [],
+        }
+    )
+
+
 @pytest.fixture
 def scripted_llm(monkeypatch):
     """Replace the OpenRouter call with a deterministic lookup."""
@@ -80,7 +130,8 @@ def scripted_llm(monkeypatch):
     async def fake_classify(_client, report_text: str, prompt_text: str) -> Triage:
         calls.append(report_text)
         table = (
-            IMPROVED_PREDICTIONS if IMPROVED_MARKER in prompt_text
+            IMPROVED_PREDICTIONS
+            if IMPROVED_MARKER in prompt_text
             else BASELINE_PREDICTIONS
         )
         severity, component = table[report_text]
@@ -121,7 +172,7 @@ async def test_improved_prompt_reports_gain_and_regression(scripted_llm):
     assert result.active.overall_accuracy == pytest.approx(0.50)
     assert result.overall_delta == pytest.approx(0.25)
 
-    assert result.improved_count == 2   # ex1, ex2
+    assert result.improved_count == 2  # ex1, ex2
     assert result.regression_count == 1  # ex3
 
     # Nothing cached yet, so both arms ran.
@@ -129,6 +180,50 @@ async def test_improved_prompt_reports_gain_and_regression(scripted_llm):
     assert len(scripted_llm) == 8
     assert len(db.tables["evaluation_runs"]) == 2
     assert len(db.tables["evaluation_results"]) == 8
+
+
+@pytest.mark.asyncio
+async def test_candidate_with_regression_is_rejected_and_control_stays_active(
+    scripted_llm,
+):
+    db = make_candidate_db()
+    result = await run_evaluation(db, llm_client=None)
+
+    assert result.candidate_decision == "rejected"
+    assert result.overall_delta == pytest.approx(0.25)
+    assert result.regression_count == 1
+    assert db.tables["prompt_versions"][0]["is_active"] is True
+    assert db.tables["prompt_versions"][1]["lifecycle_status"] == "rejected"
+
+    latest = await get_latest_evaluation(db)
+    assert latest is not None
+    assert latest.candidate_decision == "rejected"
+    assert latest.active.version_name == "v2-improved"
+
+
+@pytest.mark.asyncio
+async def test_candidate_with_gain_and_zero_regressions_is_activated(monkeypatch):
+    safe_predictions = {
+        **IMPROVED_PREDICTIONS,
+        "button shifted": ("low", "frontend"),
+    }
+
+    async def safe_classify(_client, report_text: str, prompt_text: str) -> Triage:
+        table = (
+            safe_predictions if IMPROVED_MARKER in prompt_text else BASELINE_PREDICTIONS
+        )
+        severity, component = table[report_text]
+        return Triage(severity=severity, component=component, rationale="scripted")
+
+    monkeypatch.setattr(evaluation_module, "classify", safe_classify)
+    db = make_candidate_db()
+    result = await run_evaluation(db, llm_client=None)
+
+    assert result.candidate_decision == "activated"
+    assert result.overall_delta > 0
+    assert result.regression_count == 0
+    assert db.tables["prompt_versions"][0]["lifecycle_status"] == "superseded"
+    assert db.tables["prompt_versions"][1]["is_active"] is True
 
 
 @pytest.mark.asyncio

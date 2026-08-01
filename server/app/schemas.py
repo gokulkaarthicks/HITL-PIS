@@ -89,10 +89,10 @@ class EvalRunSummary(BaseModel):
 class EvalComparison(BaseModel):
     """Before/after metrics returned by POST /eval/run and GET /eval/latest.
 
-    `previous` is the prompt version immediately preceding the active one, not a
-    fixed baseline. `previous_is_cached` says whether its score was reused from
-    an earlier stored run rather than freshly computed -- the UI must surface
-    that so a reused number is never mistaken for a fresh one.
+    During a candidate decision, `previous` is the live control and `active` is
+    the candidate being measured; `candidate_decision` says whether it was
+    activated or rejected. Historical comparisons retain the previous/active
+    naming for API compatibility.
     """
 
     previous: EvalRunSummary
@@ -105,3 +105,4 @@ class EvalComparison(BaseModel):
     example_count: int
     evaluated_at: str
     previous_is_cached: bool = False
+    candidate_decision: Literal["activated", "rejected"] | None = None

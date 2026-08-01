@@ -6,6 +6,7 @@ from app.prompt_service import (
     build_improved_prompt_text,
     get_baseline_prompt,
     get_previous_prompt,
+    improve_prompt,
     next_version_name,
     select_few_shot_corrections,
     summarize_confusions,
@@ -76,9 +77,15 @@ def test_selection_respects_the_limit():
 
 def test_selection_is_deterministic_regardless_of_input_order():
     rows = [
-        correction("1", "a", ("low", "backend"), ("high", "auth"), "2026-01-01T00:00:00Z"),
-        correction("2", "b", ("low", "backend"), ("high", "auth"), "2026-01-02T00:00:00Z"),
-        correction("3", "c", ("low", "backend"), ("high", "auth"), "2026-01-03T00:00:00Z"),
+        correction(
+            "1", "a", ("low", "backend"), ("high", "auth"), "2026-01-01T00:00:00Z"
+        ),
+        correction(
+            "2", "b", ("low", "backend"), ("high", "auth"), "2026-01-02T00:00:00Z"
+        ),
+        correction(
+            "3", "c", ("low", "backend"), ("high", "auth"), "2026-01-03T00:00:00Z"
+        ),
     ]
     forward = [r["id"] for r in select_few_shot_corrections(rows, 3)]
     backward = [r["id"] for r in select_few_shot_corrections(list(reversed(rows)), 3)]
@@ -128,7 +135,11 @@ def test_confirmations_produce_no_confusion_lines():
 
 
 def test_improved_prompt_contains_baseline_calibration_and_examples():
-    rows = [correction("1", "Checkout is down", ("low", "backend"), ("critical", "payments"))]
+    rows = [
+        correction(
+            "1", "Checkout is down", ("low", "backend"), ("critical", "payments")
+        )
+    ]
     text = build_improved_prompt_text(BASELINE, rows, max_examples=5)
 
     assert text.startswith("# Bug report triage operating prompt")
@@ -252,3 +263,30 @@ async def test_baseline_falls_back_to_oldest_when_seed_name_is_absent():
     )
     baseline = await get_baseline_prompt(db)
     assert baseline["version_name"] == "renamed-control"
+
+
+@pytest.mark.asyncio
+async def test_improve_creates_inactive_candidate_without_replacing_active_prompt():
+    reviewed = correction(
+        "b1", "checkout is down", ("high", "backend"), ("critical", "payments")
+    )
+    reviewed["status"] = "reviewed"
+    db = FakeSupabase(
+        {
+            "prompt_versions": [
+                {
+                    **prompt_row(
+                        "p1", "v1-baseline", "2026-01-01T00:00:00+00:00", True
+                    ),
+                    "lifecycle_status": "active",
+                }
+            ],
+            "bug_reports": [reviewed],
+        }
+    )
+
+    candidate = await improve_prompt(db)
+
+    assert candidate["lifecycle_status"] == "candidate"
+    assert candidate["is_active"] is False
+    assert db.tables["prompt_versions"][0]["is_active"] is True

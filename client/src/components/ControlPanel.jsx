@@ -35,6 +35,8 @@ export default function ControlPanel({
   const elapsed = useElapsedSeconds(evaluating)
 
   const corrections = activePrompt?.available_corrections_count ?? 0
+  const candidate = activePrompt?.pending_candidate ?? null
+  const schemaUpgradeRequired = activePrompt?.schema_upgrade_required ?? false
   const hasImprovedPrompt = promptCount > 1
 
   return (
@@ -82,21 +84,44 @@ export default function ControlPanel({
 
       <section className="space-y-2">
         <Rule>improve</Rule>
+        {schemaUpgradeRequired && (
+          <div className="border border-ansi-red/50 bg-term-bg p-2 text-[13px] leading-relaxed">
+            <p className="text-ansi-red">database upgrade required</p>
+            <p className="text-term-dim">
+              apply supabase/schema.sql, then reload this page
+            </p>
+          </div>
+        )}
+        {candidate && (
+          <div className="border border-ansi-yellow/40 bg-term-bg p-2 text-[13px] leading-relaxed">
+            <p className="text-ansi-yellow">candidate {candidate.version_name}</p>
+            <p className="text-term-dim">
+              inactive until evaluation shows a positive gain with zero regressions
+            </p>
+          </div>
+        )}
         <Button
           variant="primary"
           className="w-full"
           loading={improving}
-          disabled={corrections === 0}
+          disabled={
+            corrections === 0 || Boolean(candidate) || schemaUpgradeRequired
+          }
           onClick={onImprove}
         >
-          improve prompt
+          {candidate ? 'candidate waiting' : 'build candidate'}
         </Button>
       </section>
 
       <section className="space-y-2">
         <Rule>evaluation</Rule>
-        <Button className="w-full" loading={evaluating} onClick={onRunEvaluation}>
-          run evaluation
+        <Button
+          className="w-full"
+          loading={evaluating}
+          disabled={schemaUpgradeRequired}
+          onClick={onRunEvaluation}
+        >
+          {candidate ? 'evaluate candidate' : 'run evaluation'}
         </Button>
         {evaluating && (
           <div className="space-y-1">

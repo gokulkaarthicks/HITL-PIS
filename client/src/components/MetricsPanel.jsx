@@ -30,6 +30,7 @@ export default function MetricsPanel({ evaluation }) {
     previous_is_cached: previousIsCached,
   } = evaluation
   const unchanged = previous.prompt_version_id === active.prompt_version_id
+  const decision = evaluation.candidate_decision
 
   const deltaClass =
     delta > 0 ? 'text-ansi-green' : delta < 0 ? 'text-ansi-red' : 'text-term-dim'
@@ -43,7 +44,7 @@ export default function MetricsPanel({ evaluation }) {
         value={formatPercent(previous.overall_accuracy)}
       />
       <Row
-        label={`current   ${active.version_name}`}
+        label={`${decision ? 'candidate' : 'current  '} ${active.version_name}`}
         value={formatPercent(active.overall_accuracy)}
         valueClass="text-ansi-cyan tabular-nums"
       />
@@ -53,6 +54,13 @@ export default function MetricsPanel({ evaluation }) {
         value={regressions}
         valueClass={regressionClass}
       />
+      {decision && (
+        <Row
+          label="decision"
+          value={decision}
+          valueClass={decision === 'activated' ? 'text-ansi-green' : 'text-ansi-red'}
+        />
+      )}
 
       <div className="pt-2" />
 

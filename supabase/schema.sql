@@ -32,9 +32,51 @@ create table if not exists prompt_versions (
     created_at                      timestamptz not null default now()
 );
 
+-- Additive lifecycle migration for databases created before candidate gating.
+alter table prompt_versions
+    add column if not exists lifecycle_status text,
+    add column if not exists evaluated_against_prompt_id uuid
+        references prompt_versions (id) on delete set null,
+    add column if not exists evaluation_decision text,
+    add column if not exists evaluated_at timestamptz;
+
+update prompt_versions
+set lifecycle_status = case when is_active then 'active' else 'superseded' end
+where lifecycle_status is null;
+
+alter table prompt_versions
+    alter column lifecycle_status set default 'candidate',
+    alter column lifecycle_status set not null;
+
+do $constraints$
+begin
+    if not exists (
+        select 1 from pg_constraint
+        where conname = 'prompt_versions_lifecycle_status_check'
+    ) then
+        alter table prompt_versions
+            add constraint prompt_versions_lifecycle_status_check
+            check (lifecycle_status in
+                   ('candidate', 'active', 'rejected', 'superseded'));
+    end if;
+    if not exists (
+        select 1 from pg_constraint
+        where conname = 'prompt_versions_evaluation_decision_check'
+    ) then
+        alter table prompt_versions
+            add constraint prompt_versions_evaluation_decision_check
+            check (evaluation_decision is null or evaluation_decision in
+                   ('activated', 'rejected'));
+    end if;
+end
+$constraints$;
+
 -- At most one active prompt version at a time.
 create unique index if not exists prompt_versions_single_active
     on prompt_versions ((is_active)) where is_active;
+
+create unique index if not exists prompt_versions_single_candidate
+    on prompt_versions ((lifecycle_status)) where lifecycle_status = 'candidate';
 
 create index if not exists prompt_versions_created_at_idx
     on prompt_versions (created_at);
@@ -188,6 +230,10 @@ begin
     delete from prompt_versions where id <> baseline_id;
     update prompt_versions
     set is_active = true,
+        lifecycle_status = 'active',
+        evaluated_against_prompt_id = null,
+        evaluation_decision = null,
+        evaluated_at = null,
         created_from_corrections_count = 0
     where id = baseline_id;
 
@@ -206,3 +252,65 @@ $$;
 
 revoke all on function public.reset_demo() from public, anon, authenticated;
 grant execute on function public.reset_demo() to service_role;
+
+-- Resolve a held-out evaluation as one transaction. A candidate can become
+-- active only when the application has already verified a positive delta and
+-- zero regressions; otherwise it is retained as rejected evidence.
+create or replace function public.resolve_prompt_candidate(
+    p_candidate_id uuid,
+    p_evaluated_against_prompt_id uuid,
+    p_accept boolean
+)
+returns setof prompt_versions
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if not exists (
+        select 1 from prompt_versions
+        where id = p_candidate_id
+          and lifecycle_status = 'candidate'
+          and not is_active
+    ) then
+        raise exception 'Candidate prompt is missing or already resolved';
+    end if;
+
+    if not exists (
+        select 1 from prompt_versions
+        where id = p_evaluated_against_prompt_id
+          and is_active
+    ) then
+        raise exception 'Evaluation control is no longer the active prompt';
+    end if;
+
+    if p_accept then
+        update prompt_versions
+        set is_active = false,
+            lifecycle_status = 'superseded'
+        where id = p_evaluated_against_prompt_id;
+
+        update prompt_versions
+        set is_active = true,
+            lifecycle_status = 'active',
+            evaluated_against_prompt_id = p_evaluated_against_prompt_id,
+            evaluation_decision = 'activated',
+            evaluated_at = now()
+        where id = p_candidate_id;
+    else
+        update prompt_versions
+        set lifecycle_status = 'rejected',
+            evaluated_against_prompt_id = p_evaluated_against_prompt_id,
+            evaluation_decision = 'rejected',
+            evaluated_at = now()
+        where id = p_candidate_id;
+    end if;
+
+    return query select * from prompt_versions where id = p_candidate_id;
+end;
+$$;
+
+revoke all on function public.resolve_prompt_candidate(uuid, uuid, boolean)
+    from public, anon, authenticated;
+grant execute on function public.resolve_prompt_candidate(uuid, uuid, boolean)
+    to service_role;

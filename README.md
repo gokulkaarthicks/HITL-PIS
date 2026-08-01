@@ -12,11 +12,13 @@ bug report ──> LLM triage ──> human correction ──> stored
                                                      │
                           ┌──────────────────────────┘
                           v
-              new prompt version (few-shot + calibration)
+            candidate prompt (few-shot + calibration)
                           │
                           v
-      evaluation on held-out examples: previous version vs active
-                 accuracy delta · regression count
+       fresh held-out evaluation: live prompt vs candidate
+                          │
+             positive gain + zero regressions?
+                   activate / reject
 ```
 
 **Stack:** React + Vite + Tailwind · FastAPI · Supabase Postgres · OpenRouter
@@ -51,16 +53,15 @@ bug report ──> LLM triage ──> human correction ──> stored
 3. **Correct** - the reviewer edits severity, component and rationale, and
    saves. The correction is written to `bug_reports.human_corrected_json` and an
    immutable audit row is appended to `review_events`.
-4. **Improve** - "Improve Prompt" builds a new prompt version from every stored
-   correction and marks it active. The generated text is stored in
+4. **Improve** - "Build Candidate" creates a new prompt version from every stored
+   correction but keeps the current prompt active. The generated text is stored in
    `prompt_versions`. A stable operating structure and decision process live in
    `prompt_service.py`; calibration rules and reference cases are generated
    deterministically from the current human corrections.
-5. **Evaluate** - "Run Evaluation" scores the active prompt against the
-   **immediately previous prompt version** on the held-out set and reports
-   accuracy, delta and regressions. The previous version's score is reused from
-   its last stored run rather than recomputed, so a run costs one LLM call per
-   example instead of two.
+5. **Evaluate and gate** - "Evaluate Candidate" freshly scores the live prompt
+   and candidate on the same held-out set. The candidate is activated atomically
+   only when overall accuracy increases and regressions are zero; otherwise it is
+   retained as rejected evidence and the live prompt is unchanged.
 
 The split in step 1 is the point of the whole design: the improved prompt is
 built from the review pool and scored on text it has never seen, so a gain is a
@@ -86,7 +87,7 @@ gain and not recall.
 │   │   ├── prompt_service.py  prompt version assembly
 │   │   ├── evaluation.py      baseline vs active orchestration
 │   │   └── routes/            health, bugs, prompts, evaluation
-│   └── tests/                 53 unit + loop tests
+│   └── tests/                 56 unit + loop tests
 └── supabase/
     ├── schema.sql             tables, constraints, indexes, RLS
     └── seed.sql               baseline prompt + 111 bug reports
@@ -122,6 +123,17 @@ psql "$SUPABASE_DB_URL" -f supabase/schema.sql && psql "$SUPABASE_DB_URL" -f sup
 `seed.sql` is idempotent: bootstrap blocks skip populated tables and expanded
 review reports are inserted only when their exact text is missing. Re-running
 it never duplicates data or destroys your corrections.
+
+### Upgrading an existing database
+
+After pulling candidate-evaluation changes, run `supabase/schema.sql` again
+before restarting the API. The file is idempotent and adds the prompt lifecycle
+columns plus the transactional `resolve_prompt_candidate` function without
+deleting reports, corrections, prompts, or evaluation history.
+
+If the UI says **database upgrade required** or Postgres reports that
+`prompt_versions.lifecycle_status` does not exist, the API is connected to the
+old schema. Apply `supabase/schema.sql`, then reload the application.
 
 ### 2. Backend
 
@@ -179,7 +191,7 @@ Six tables, defined in [`supabase/schema.sql`](supabase/schema.sql).
 | --- | --- |
 | `bug_reports` | Review pool: report text, LLM output, human correction, status, prompt version used, reviewer, timestamps |
 | `review_events` | Append-only audit trail: what a correction replaced, who made it, when |
-| `prompt_versions` | Every prompt, including generated ones. Exactly one is active |
+| `prompt_versions` | Every prompt plus candidate/active/rejected lifecycle and evaluation decision |
 | `evaluation_examples` | Held-out gold set with expected labels |
 | `evaluation_runs` | One row per prompt version per evaluation: accuracies + regression count |
 | `evaluation_results` | Per-example detail backing each run |
@@ -190,6 +202,8 @@ Notable constraints:
   bad label fails at write time instead of silently corrupting accuracy.
 - A partial unique index (`prompt_versions_single_active`) makes "two active
   prompts at once" unrepresentable.
+- A second partial unique index allows only one unevaluated candidate, and the
+  `resolve_prompt_candidate` RPC activates or rejects it transactionally.
 - RLS is enabled with **no** policies. The backend uses the service-role key,
   which bypasses RLS; nothing else can read these tables.
 
@@ -259,12 +273,12 @@ URL.
 4. Change severity and/or component, adjust the rationale, and **Save
    correction**. Fields that differ from the model's answer are marked
    `changed`. Repeat for 8–12 reports - the more corrections, the more signal.
-5. Click **Improve Prompt**. A new version (`v2-improved`) is generated from
-   your corrections and becomes active. Use **View prompt text** to read exactly
-   what was built and stored.
-6. Click **Run Evaluation** again. The metrics panel now shows previous
-   accuracy, current accuracy, the improvement delta, regression count, and the
-   evaluation timestamp.
+5. Click **Build Candidate**. A new version (`v2-improved`) is generated from
+   your corrections but remains inactive.
+6. Click **Evaluate Candidate**. The metrics panel shows live-versus-candidate
+   accuracy, delta, regression count, and the activation decision. A positive
+   gain with zero regressions activates the candidate; every other result keeps
+   the current prompt live.
 
 Corrections that *disagree* with the model teach the most, so a demo where you
 deliberately fix the model's weak spots (under-called severities, everything
@@ -283,9 +297,9 @@ labelled `backend`) shows the largest, most legible gain.
 | `PUT` | `/bugs/{bug_id}/correction` | Save a human correction + audit event |
 | `GET` | `/prompts` | All prompt versions, oldest first |
 | `GET` | `/prompts/active` | Active version + available correction count |
-| `POST` | `/prompts/improve` | Build and activate a new version |
+| `POST` | `/prompts/improve` | Build one inactive candidate version |
 | `GET` | `/eval/examples` | The held-out gold set |
-| `POST` | `/eval/run` | Score active vs previous version, store results, return comparison. `?force=true` re-scores the previous arm instead of reusing its stored run |
+| `POST` | `/eval/run` | With a candidate: freshly score live vs candidate and atomically activate or reject it. Otherwise score the current active/previous comparison. |
 | `POST` | `/eval/run/stream` | Same work, streamed as newline-delimited JSON: `{"type":"progress","completed":n,"total":m,"arm":…}` per example, then one `{"type":"result"…}` or `{"type":"error"…}`. Also accepts `?force=true` |
 | `GET` | `/eval/latest` | Last stored comparison (`204` if none yet) |
 | `POST` | `/admin/reset` | Transactional reset to the 93-report unreviewed baseline. Requires `{"confirmation":"RESET"}` |
@@ -321,7 +335,7 @@ its state.
 cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
 ```
 
-53 tests covering the parts where correctness actually matters:
+56 tests covering the parts where correctness actually matters:
 
 - **`test_grading.py`** - exact-match scoring, case/whitespace normalization,
   failed LLM calls counting as incorrect, per-axis accuracy, regression and
@@ -329,9 +343,9 @@ cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -
 - **`test_prompt_service.py`** - few-shot selection prioritising disagreements,
   determinism, confusion tallies, prompt assembly, baseline pinning.
 - **`test_evaluation_loop.py`** - the whole loop against an in-memory Supabase
-  and a scripted model: both arms scored, a prompt that fixes two cases while
-  breaking one reports **both** the gain and the regression, and `/eval/latest`
-  reads back the same numbers from stored rows.
+  and a scripted model: both arms are scored fresh for a candidate, regressions
+  reject activation, a safe gain activates atomically, and `/eval/latest` reads
+  accepted or rejected evidence back from stored rows.
 - **`test_config.py` / `test_cors.py`** - Cloudflare runtime bindings override
   settings safely, malformed optional values retain defaults, and deployed CORS
   origins are applied without exposing secrets to the frontend.
@@ -413,10 +427,9 @@ returns error 1102 during evaluation, the production solution is a queued or
 batched evaluation rather than increasing concurrency.
 
 The default OpenRouter model is also free, but free accounts are limited to 50
-model requests/day. A forced 18-case two-arm evaluation uses 36 of them, so use
-the cached previous arm for normal runs. After changing `OPENROUTER_MODEL`, run
-the evaluation once with `?force=true`; scores cached under another model are
-not comparable.
+model requests/day. A candidate decision deliberately uses 36 calls because both
+arms are scored fresh; deployment safety takes priority over reusing a possibly
+incompatible cached score.
 
 ---
 
@@ -427,15 +440,9 @@ not comparable.
   API is unauthenticated.
 - **Every correction is ground truth.** The system treats a saved correction as
   correct without adjudication, agreement scoring, or conflict resolution.
-- **The comparison arm is the immediately previous version.** v3 is scored
-  against v2, not against v1, so a delta answers "did the last improvement
-  help?" rather than "how far have we come since the start". Cumulative
-  progress against v1 is therefore not a reported number.
-- **A previous version's score is stable enough to cache.** Its prompt text is
-  immutable and decoding is deterministic (`temperature=0` + fixed seed), so a
-  stored run is reused instead of recomputed. The cache is invalidated when the
-  evaluation example set changes; a changed model or seed cannot be detected,
-  which is what `?force=true` is for.
+- **The candidate is compared with the current live version.** Both arms run
+  fresh under the same model and decoding settings. Cumulative progress against
+  v1 is not reported.
 - **`v1-baseline` remains the composition root.** Improved versions are always
   rebuilt from it plus the full correction set, never by appending to the
   previous improved prompt. This is separate from the comparison arm.
@@ -456,20 +463,14 @@ not comparable.
 - **Rationale quality is not scored.** It is stored and shown for manual
   inspection only. Scoring free text would require a second model, which this
   system deliberately avoids - accuracy must stay deterministic and auditable.
-- **Evaluation cost grows linearly.** A run is one LLM call per example (18)
-  when the previous arm is cached, and two per example (36) on a cache miss or
-  with `?force=true`. Cheap on this model, but not free.
-- **A cached previous score can go stale invisibly.** Changing
-  `OPENROUTER_MODEL`, `LLM_TEMPERATURE` or `LLM_SEED` invalidates it in a way
-  the code cannot detect, so the next comparison would mix decoding settings.
-  Run once with `?force=true` after any such change.
+- **Evaluation cost grows linearly.** A candidate decision makes two calls per
+  example (36 total for this gold set). Cheap on this model, but not free.
 - **Improvement is not guaranteed to be monotonic.** More corrections can make
-  the prompt worse; that is exactly what the regression count is for. There is
-  no automatic rollback - reactivating an older version is a manual DB update.
-- **`POST /prompts/improve` is not concurrency-safe.** Two simultaneous calls
-  could race between deactivating the old version and inserting the new one. The
-  unique index prevents two active prompts from being committed, so the loser
-  errors rather than corrupting state, but it is not retried.
+  a candidate worse. The gate rejects a non-positive delta or any regression,
+  but there is not yet a manual rollback control for an already active version.
+- **Only one candidate may wait for evaluation.** The partial unique index
+  rejects concurrent candidate creation; the client must evaluate or reject the
+  existing candidate before building another one.
 - **Not verified against live Supabase or OpenRouter.** The loop was verified
   end to end over real HTTP against the real routes and services, with an
   in-memory database and a scripted model standing in for the two external
