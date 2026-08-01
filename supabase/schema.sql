@@ -141,3 +141,68 @@ alter table review_events       enable row level security;
 alter table evaluation_examples enable row level security;
 alter table evaluation_runs     enable row level security;
 alter table evaluation_results  enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Demo reset RPC
+--
+-- Restores the seeded review workflow without touching the held-out gold set.
+-- One Postgres function keeps the destructive operation transactional.
+-- ---------------------------------------------------------------------------
+create or replace function public.reset_demo()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    baseline_id uuid;
+    deleted_manual_count integer;
+    seeded_bug_count integer;
+begin
+    select id into baseline_id
+    from prompt_versions
+    where version_name = 'v1-baseline';
+
+    if baseline_id is null then
+        raise exception 'Cannot reset: v1-baseline does not exist';
+    end if;
+
+    delete from evaluation_runs;
+    delete from review_events;
+
+    delete from bug_reports where source = 'manual';
+    get diagnostics deleted_manual_count = row_count;
+
+    update bug_reports
+    set llm_output_json = null,
+        human_corrected_json = null,
+        status = 'new',
+        prompt_version_used = null,
+        reviewer_id = null,
+        llm_run_at = null,
+        reviewed_at = null,
+        last_updated_at = now()
+    where source = 'seed';
+
+    update prompt_versions set is_active = false where is_active;
+    delete from prompt_versions where id <> baseline_id;
+    update prompt_versions
+    set is_active = true,
+        created_from_corrections_count = 0
+    where id = baseline_id;
+
+    select count(*) into seeded_bug_count
+    from bug_reports
+    where source = 'seed';
+
+    return jsonb_build_object(
+        'status', 'reset',
+        'seeded_bug_count', seeded_bug_count,
+        'deleted_manual_count', deleted_manual_count,
+        'active_prompt', 'v1-baseline'
+    );
+end;
+$$;
+
+revoke all on function public.reset_demo() from public, anon, authenticated;
+grant execute on function public.reset_demo() to service_role;

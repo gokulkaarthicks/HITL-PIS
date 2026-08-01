@@ -4,9 +4,9 @@ We talk to Supabase over its REST interface rather than a Postgres wire-protocol
 driver because the deployment target (Cloudflare Workers) cannot open raw TCP
 sockets. HTTP works identically locally and on Workers.
 
-Only the four verbs this app actually needs are implemented. Filters are passed
-as PostgREST operator strings (``{"id": "eq.<uuid>"}``) so callers stay explicit
-about matching semantics.
+Only the operations this app needs are implemented, including the guarded demo
+reset RPC. Filters are passed as PostgREST operator strings
+(``{"id": "eq.<uuid>"}``) so callers stay explicit about matching semantics.
 """
 
 from __future__ import annotations
@@ -117,6 +117,12 @@ class SupabaseClient:
             params=dict(filters),
             json=values,
             prefer="return=representation",
+        )
+
+    async def rpc(self, function_name: str, arguments: Row | None = None) -> list[Row]:
+        """Call a PostgREST database function."""
+        return await self._request(
+            "POST", f"rpc/{function_name}", json=arguments or {}
         )
 
 

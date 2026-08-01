@@ -3,6 +3,7 @@ import AddBugDialog from './components/AddBugDialog.jsx'
 import BugDetail from './components/BugDetail.jsx'
 import BugList from './components/BugList.jsx'
 import ControlPanel from './components/ControlPanel.jsx'
+import ResetDemoDialog from './components/ResetDemoDialog.jsx'
 import StatusBar from './components/StatusBar.jsx'
 import { Toast } from './components/ui.jsx'
 import { api } from './lib/api.js'
@@ -35,6 +36,8 @@ export default function App() {
   const [evalProgress, setEvalProgress] = useState(null)
   const [addOpen, setAddOpen] = useState(false)
   const [addSubmitting, setAddSubmitting] = useState(false)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   const [toast, setToast] = useState(null)
   const notify = useCallback((message, kind = 'error') => {
@@ -234,6 +237,33 @@ export default function App() {
     }
   }, [notify])
 
+  const handleResetDemo = useCallback(
+    async () => {
+      setResetting(true)
+      try {
+        const result = await api.resetDemo()
+        const list = await api.listBugs()
+        setBugs(list)
+        setSelectedId(list[0]?.id ?? null)
+        setEvaluation(null)
+        await refreshPrompts()
+        setResetOpen(false)
+        notify(
+          `Demo reset complete: ${result.seeded_bug_count} seeded reports, v1-baseline active.`,
+          'success',
+        )
+      } catch (error) {
+        notify(error.message)
+      } finally {
+        setResetting(false)
+      }
+    },
+    [notify, refreshPrompts],
+  )
+
+  const resetDisabled =
+    runningIds.size > 0 || saving || improving || evaluating || addSubmitting
+
   return (
     <div className="flex h-full flex-col">
       {/* Prompt line: title reads as a command typed after the shell arrow. */}
@@ -274,6 +304,9 @@ export default function App() {
           evalProgress={evalProgress}
           onImprove={handleImprove}
           onRunEvaluation={handleRunEvaluation}
+          resetting={resetting}
+          resetDisabled={resetDisabled}
+          onReset={() => setResetOpen(true)}
         />
       </div>
 
@@ -292,6 +325,12 @@ export default function App() {
         submitting={addSubmitting}
         onClose={() => setAddOpen(false)}
         onSubmit={handleAddBug}
+      />
+      <ResetDemoDialog
+        open={resetOpen}
+        submitting={resetting}
+        onClose={() => setResetOpen(false)}
+        onSubmit={handleResetDemo}
       />
       <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>

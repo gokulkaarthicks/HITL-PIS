@@ -18,7 +18,7 @@ from .db import SupabaseError, close_db
 from .evaluation import EvaluationError
 from .llm import LLMError, build_llm_client
 from .prompt_service import PromptServiceError
-from .routes import bugs, evaluation, health, prompts
+from .routes import admin, bugs, evaluation, health, prompts
 
 logger = logging.getLogger("hitl")
 logging.basicConfig(level=logging.INFO)
@@ -98,6 +98,7 @@ async def handle_runtime_error(_: Request, exc: RuntimeError) -> JSONResponse:
 
 
 app.include_router(health.router)
+app.include_router(admin.router)
 app.include_router(bugs.router)
 app.include_router(prompts.router)
 app.include_router(evaluation.router)

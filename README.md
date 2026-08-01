@@ -286,10 +286,24 @@ labelled `backend`) shows the largest, most legible gain.
 | `POST` | `/eval/run` | Score active vs previous version, store results, return comparison. `?force=true` re-scores the previous arm instead of reusing its stored run |
 | `POST` | `/eval/run/stream` | Same work, streamed as newline-delimited JSON: `{"type":"progress","completed":n,"total":m,"arm":…}` per example, then one `{"type":"result"…}` or `{"type":"error"…}`. Also accepts `?force=true` |
 | `GET` | `/eval/latest` | Last stored comparison (`204` if none yet) |
+| `POST` | `/admin/reset` | Transactional reset to the 93-report unreviewed baseline. Requires `{"confirmation":"RESET"}` |
 
 Errors are returned as `{"detail": "..."}`: `409` for an invalid state (no
 corrections yet, no examples seeded), `502` for an upstream Supabase/OpenRouter
 failure, `404` for a missing bug report.
+
+### Resetting the public demo
+
+The **reset demo** control restores the initial interview state transactionally:
+93 seeded reports become unreviewed, manual reports and audit/evaluation history
+are removed, improved prompts are deleted, and `v1-baseline` becomes active.
+The 18 held-out evaluation examples are preserved.
+
+Apply the latest `supabase/schema.sql` once to install the `reset_demo()` RPC.
+The button opens a confirmation dialog and remains disabled until the user types
+the exact literal `RESET`. The operation is intentionally unauthenticated for
+the interview demo, so anyone with access to the public application can reset
+its state.
 
 ---
 
@@ -299,7 +313,7 @@ failure, `404` for a missing bug report.
 cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
 ```
 
-46 tests covering the parts where correctness actually matters:
+51 tests covering the parts where correctness actually matters:
 
 - **`test_grading.py`** - exact-match scoring, case/whitespace normalization,
   failed LLM calls counting as incorrect, per-axis accuracy, regression and

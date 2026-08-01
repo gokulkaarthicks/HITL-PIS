@@ -30,6 +30,9 @@ export default function ControlPanel({
   evalProgress,
   onImprove,
   onRunEvaluation,
+  resetting,
+  resetDisabled,
+  onReset,
 }) {
   const [showPrompt, setShowPrompt] = useState(false)
   const elapsed = useElapsedSeconds(evaluating)
@@ -138,6 +141,23 @@ export default function ControlPanel({
           </div>
         )}
         <MetricsPanel evaluation={evaluation} />
+      </section>
+
+      <section className="space-y-2">
+        <Rule>demo controls</Rule>
+        <Button
+          variant="danger"
+          className="w-full"
+          loading={resetting}
+          disabled={resetDisabled}
+          onClick={onReset}
+        >
+          reset demo
+        </Button>
+        <p className="text-[12px] leading-relaxed text-term-faint">
+          <span># </span>
+          type RESET in the confirmation dialog to restore the baseline
+        </p>
       </section>
     </aside>
   )

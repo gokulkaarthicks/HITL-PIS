@@ -41,6 +41,8 @@ const BUTTON_VARIANTS = {
     'text-term-fg border-term-line hover:bg-term-fg hover:text-term-bg hover:border-term-fg',
   ghost:
     'text-term-dim border-transparent hover:text-term-fg hover:border-term-line',
+  danger:
+    'text-ansi-red border-ansi-red/40 hover:bg-ansi-red hover:text-term-bg hover:border-ansi-red',
 }
 
 /**
@@ -131,6 +133,10 @@ export function Select({ options, ...props }) {
 
 export function TextArea(props) {
   return <textarea className={`${CONTROL} resize-y`} {...props} />
+}
+
+export function Input(props) {
+  return <input className={CONTROL} {...props} />
 }
 
 /** Bottom-anchored line, prefixed like stderr/stdout output. */

@@ -6,12 +6,15 @@ const BASE_URL = (
  * Thin fetch wrapper. The backend always reports failures as {"detail": "..."},
  * so surface that text directly instead of a generic "request failed".
  */
-async function request(path, { method = 'GET', body } = {}) {
+async function request(path, { method = 'GET', body, headers } = {}) {
   let response
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: {
+        ...headers,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
       body: body ? JSON.stringify(body) : undefined,
     })
   } catch {
@@ -143,4 +146,10 @@ export const api = {
   },
 
   latestEvaluation: () => request('/eval/latest'),
+
+  resetDemo: () =>
+    request('/admin/reset', {
+      method: 'POST',
+      body: { confirmation: 'RESET' },
+    }),
 }

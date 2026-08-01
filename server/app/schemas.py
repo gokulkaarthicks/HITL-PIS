@@ -72,6 +72,10 @@ class CorrectionRequest(BaseModel):
     reviewer_id: str = Field(min_length=1, max_length=64)
 
 
+class ResetDemoRequest(BaseModel):
+    confirmation: Literal["RESET"]
+
+
 class EvalRunSummary(BaseModel):
     prompt_version_id: str
     version_name: str
