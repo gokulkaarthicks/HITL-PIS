@@ -4,7 +4,7 @@ const SECTIONS = [
     points: [
       'Capture every triage, correction, and prompt version; rebuild each candidate from the baseline plus correction-derived calibration and a few distinct examples.',
       'Score on an 18-example held-out set (separate from the 93-report review pool) with deterministic exact match, no LLM judge.',
-      'Activate a candidate only when overall accuracy rises and regression count is zero, so local gains cannot quietly break working cases.',
+      'Promote a candidate only when it reduces remaining errors by at least 30%, does not lower severity or component accuracy, stays within two ordinary regressions, and introduces no protected regression.',
     ],
   },
   {
@@ -85,7 +85,7 @@ export default function DocsPage() {
           <SectionHeading>loop</SectionHeading>
           <p className="text-justify text-[15px] leading-7 text-term-fg">
             bug report → LLM triage → human correction → candidate prompt →
-            held-out evaluation → activate or reject
+            held-out evaluation → promote or reject
           </p>
         </section>
 
