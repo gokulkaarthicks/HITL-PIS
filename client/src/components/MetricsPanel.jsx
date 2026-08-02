@@ -69,7 +69,7 @@ export default function MetricsPanel({ evaluation }) {
       {decision && (
         <>
           <Row
-            label="ordinary regression budget"
+            label="ordinary regression limit"
             value={`${ordinaryRegressions} / ${ordinaryRegressionLimit}`}
             valueClass={
               ordinaryRegressions <= ordinaryRegressionLimit

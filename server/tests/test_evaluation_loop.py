@@ -264,7 +264,7 @@ def regression_detail(*, protected: bool = False) -> RegressionDetail:
     [
         # Less than 30% of the control's remaining error was eliminated.
         (Accuracy(0.60, 0.60, 0.50), Accuracy(0.61, 0.61, 0.64), []),
-        # More than two ordinary regressions exceeds the explicit budget.
+        # More than two ordinary regressions exceeds the explicit limit.
         (
             Accuracy(0.60, 0.60, 0.50),
             Accuracy(0.70, 0.70, 0.70),
