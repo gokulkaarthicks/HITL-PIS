@@ -30,7 +30,6 @@
     "LLM_SEED": "7",
     "LLM_TIMEOUT_SECONDS": "25",
     "EVAL_CONCURRENCY": "4",
-    "MAX_FEW_SHOT_EXAMPLES": "6",
     "CORS_ALLOW_ORIGINS": "http://localhost:5173,https://hitl-pis.pages.dev"
   },
   "secrets": {

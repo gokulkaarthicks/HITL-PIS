@@ -229,8 +229,8 @@ export default function App() {
       )
       setEvaluation(result)
       await refreshPrompts()
-      if (result.candidate_decision === 'activated') {
-        notify('Candidate passed: positive gain, zero regressions, and is now active.', 'success')
+      if (result.candidate_decision === 'promoted') {
+        notify('Candidate passed every deterministic promotion gate and is now active.', 'success')
       } else if (result.candidate_decision === 'rejected') {
         notify('Candidate rejected: the current prompt remains active.', 'error')
       } else {

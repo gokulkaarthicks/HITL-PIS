@@ -125,7 +125,7 @@ class FakeSupabase:
             candidate.update(
                 is_active=True,
                 lifecycle_status="active",
-                evaluation_decision="activated",
+                evaluation_decision="promoted",
             )
         else:
             candidate.update(

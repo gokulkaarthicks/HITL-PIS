@@ -59,7 +59,7 @@ bug report ──> LLM triage ──> human correction ──> stored
    `prompt_service.py`; calibration rules and reference cases are generated
    deterministically from the current human corrections.
 5. **Evaluate and gate** - "Evaluate Candidate" freshly scores the live prompt
-   and candidate on the same held-out set. The candidate is activated atomically
+   and candidate on the same held-out set. The candidate is promoted atomically
    only when overall accuracy increases and regressions are zero; otherwise it is
    retained as rejected evidence and the live prompt is unchanged.
 
@@ -169,7 +169,6 @@ files are committed. **No key of any kind belongs in the repository.**
 | `LLM_SEED` | no | `7` | Same reason. |
 | `LLM_TIMEOUT_SECONDS` | no | `25` | Sets the worst-case evaluation duration, not the typical one. |
 | `EVAL_CONCURRENCY` | no | `8` | Total in-flight LLM calls, shared across both arms. Raise cautiously - rate-limit errors score as incorrect. |
-| `MAX_FEW_SHOT_EXAMPLES` | no | `6` | Maximum distinctive disagreements embedded as reference cases. |
 | `CORS_ALLOW_ORIGINS` | no | `http://localhost:5173` | Comma-separated. Set to your Pages URL in production. |
 
 ### `client/.env`

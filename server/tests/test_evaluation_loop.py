@@ -11,8 +11,15 @@ from __future__ import annotations
 import pytest
 
 from app import evaluation as evaluation_module
-from app.evaluation import EvaluationError, get_latest_evaluation, run_evaluation
-from app.schemas import Triage
+from app.evaluation import (
+    EvaluationError,
+    _passes_promotion_gate,
+    _regression_details,
+    get_latest_evaluation,
+    run_evaluation,
+)
+from app.grading import Accuracy, grade_example
+from app.schemas import RegressionDetail, Triage
 from tests.fakes import FakeSupabase
 
 IMPROVED_MARKER = "Calibration from human review"
@@ -183,26 +190,35 @@ async def test_improved_prompt_reports_gain_and_regression(scripted_llm):
 
 
 @pytest.mark.asyncio
-async def test_candidate_with_regression_is_rejected_and_control_stays_active(
+async def test_candidate_with_one_ordinary_regression_is_promoted(
     scripted_llm,
 ):
     db = make_candidate_db()
     result = await run_evaluation(db, llm_client=None)
 
-    assert result.candidate_decision == "rejected"
+    assert result.candidate_decision == "promoted"
     assert result.overall_delta == pytest.approx(0.25)
+    assert result.remaining_error_reduction == pytest.approx(1 / 3)
     assert result.regression_count == 1
-    assert db.tables["prompt_versions"][0]["is_active"] is True
-    assert db.tables["prompt_versions"][1]["lifecycle_status"] == "rejected"
+    assert result.protected_regression_count == 0
+    assert result.regression_details[0].report_text == "button shifted"
+    assert result.regression_details[0].expected == {
+        "severity": "low",
+        "component": "frontend",
+    }
+    assert result.regression_details[0].candidate_prediction["severity"] == "medium"
+    assert db.tables["prompt_versions"][0]["lifecycle_status"] == "superseded"
+    assert db.tables["prompt_versions"][1]["is_active"] is True
 
     latest = await get_latest_evaluation(db)
     assert latest is not None
-    assert latest.candidate_decision == "rejected"
+    assert latest.candidate_decision == "promoted"
     assert latest.active.version_name == "v2-improved"
+    assert latest.regression_details == result.regression_details
 
 
 @pytest.mark.asyncio
-async def test_candidate_with_gain_and_zero_regressions_is_activated(monkeypatch):
+async def test_candidate_with_gain_and_zero_regressions_is_promoted(monkeypatch):
     safe_predictions = {
         **IMPROVED_PREDICTIONS,
         "button shifted": ("low", "frontend"),
@@ -219,11 +235,95 @@ async def test_candidate_with_gain_and_zero_regressions_is_activated(monkeypatch
     db = make_candidate_db()
     result = await run_evaluation(db, llm_client=None)
 
-    assert result.candidate_decision == "activated"
+    assert result.candidate_decision == "promoted"
     assert result.overall_delta > 0
     assert result.regression_count == 0
     assert db.tables["prompt_versions"][0]["lifecycle_status"] == "superseded"
     assert db.tables["prompt_versions"][1]["is_active"] is True
+
+
+def regression_detail(*, protected: bool = False) -> RegressionDetail:
+    return RegressionDetail(
+        example_id="example",
+        report_text="example report",
+        expected={
+            "severity": "critical" if protected else "low",
+            "component": "frontend",
+        },
+        control_prediction={
+            "severity": "critical" if protected else "low",
+            "component": "frontend",
+        },
+        candidate_prediction={"severity": "high", "component": "frontend"},
+        protected=protected,
+    )
+
+
+@pytest.mark.parametrize(
+    ("control", "candidate", "regressions"),
+    [
+        # Less than 30% of the control's remaining error was eliminated.
+        (Accuracy(0.60, 0.60, 0.50), Accuracy(0.61, 0.61, 0.64), []),
+        # More than two ordinary regressions exceeds the explicit budget.
+        (
+            Accuracy(0.60, 0.60, 0.50),
+            Accuracy(0.70, 0.70, 0.70),
+            [regression_detail(), regression_detail(), regression_detail()],
+        ),
+        # A critical expected label is protected regardless of overall gain.
+        (
+            Accuracy(0.60, 0.60, 0.50),
+            Accuracy(0.70, 0.70, 0.70),
+            [regression_detail(protected=True)],
+        ),
+        # Per-axis accuracy may not decline even when overall accuracy improves.
+        (Accuracy(0.80, 0.60, 0.50), Accuracy(0.79, 0.80, 0.70), []),
+        (Accuracy(0.60, 0.80, 0.50), Accuracy(0.80, 0.79, 0.70), []),
+    ],
+)
+def test_deterministic_promotion_gate_rejects_failed_guardrails(
+    control: Accuracy,
+    candidate: Accuracy,
+    regressions: list[RegressionDetail],
+):
+    assert _passes_promotion_gate(control, candidate, regressions) is False
+
+
+def test_deterministic_promotion_gate_accepts_all_guardrails():
+    control = Accuracy(0.60, 0.60, 0.50)
+    candidate = Accuracy(0.70, 0.70, 0.70)
+
+    assert (
+        _passes_promotion_gate(
+            control, candidate, [regression_detail(), regression_detail()]
+        )
+        is True
+    )
+
+
+def test_critical_to_high_with_correct_component_is_not_protected():
+    examples = [{"id": "critical", "report_text": "complete payment outage"}]
+    control = [
+        grade_example(
+            "critical",
+            Triage(severity="critical", component="payments"),
+            "critical",
+            "payments",
+        )
+    ]
+    candidate = [
+        grade_example(
+            "critical",
+            Triage(severity="high", component="payments"),
+            "critical",
+            "payments",
+        )
+    ]
+
+    details = _regression_details(examples, control, candidate)
+
+    assert len(details) == 1
+    assert details[0].protected is False
 
 
 @pytest.mark.asyncio
@@ -390,6 +490,26 @@ async def test_failed_llm_calls_score_zero_instead_of_aborting(monkeypatch):
     result = await run_evaluation(db, llm_client=None)
     assert result.active.overall_accuracy == 0.0
     assert len(db.tables["evaluation_results"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_transient_llm_failure_is_retried(monkeypatch):
+    from app.llm import LLMError
+
+    attempts: dict[str, int] = {}
+
+    async def fails_once(_client, report_text, _prompt_text):
+        attempts[report_text] = attempts.get(report_text, 0) + 1
+        if attempts[report_text] == 1:
+            raise LLMError("temporary provider failure")
+        return Triage(severity="low", component="frontend")
+
+    monkeypatch.setattr(evaluation_module, "classify", fails_once)
+    db = make_db(with_improved_prompt=False)
+
+    await run_evaluation(db, llm_client=None)
+
+    assert set(attempts.values()) == {2}
 
 
 @pytest.mark.asyncio

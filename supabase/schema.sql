@@ -48,6 +48,14 @@ alter table prompt_versions
     alter column lifecycle_status set default 'candidate',
     alter column lifecycle_status set not null;
 
+-- Rename the successful evaluation decision without losing historical rows.
+alter table prompt_versions
+    drop constraint if exists prompt_versions_evaluation_decision_check;
+
+update prompt_versions
+set evaluation_decision = 'promoted'
+where evaluation_decision = 'activated';
+
 do $constraints$
 begin
     if not exists (
@@ -59,15 +67,10 @@ begin
             check (lifecycle_status in
                    ('candidate', 'active', 'rejected', 'superseded'));
     end if;
-    if not exists (
-        select 1 from pg_constraint
-        where conname = 'prompt_versions_evaluation_decision_check'
-    ) then
-        alter table prompt_versions
-            add constraint prompt_versions_evaluation_decision_check
-            check (evaluation_decision is null or evaluation_decision in
-                   ('activated', 'rejected'));
-    end if;
+    alter table prompt_versions
+        add constraint prompt_versions_evaluation_decision_check
+        check (evaluation_decision is null or evaluation_decision in
+               ('promoted', 'rejected'));
 end
 $constraints$;
 
@@ -296,7 +299,7 @@ begin
         set is_active = true,
             lifecycle_status = 'active',
             evaluated_against_prompt_id = p_evaluated_against_prompt_id,
-            evaluation_decision = 'activated',
+            evaluation_decision = 'promoted',
             evaluated_at = now()
         where id = p_candidate_id;
     else

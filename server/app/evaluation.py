@@ -1,8 +1,8 @@
 """Held-out evaluation and candidate deployment gating.
 
 Candidate decisions freshly score the live prompt and candidate against the
-same `evaluation_examples` with identical decoding settings. A candidate is
-activated only after a positive overall delta with zero regressions.
+same `evaluation_examples` with identical decoding settings. Promotion uses
+only deterministic exact-match metrics and explicit guardrails.
 
 When no candidate exists, the legacy active-versus-previous comparison remains
 available and may reuse a stored previous arm. Scoring itself is deterministic
@@ -12,7 +12,8 @@ pure Python in `grading.py`; no model judges accuracy.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from .config import settings
 from .db import SupabaseClient
@@ -33,7 +34,7 @@ from .prompt_service import (
     list_prompts,
     resolve_candidate,
 )
-from .schemas import EvalComparison, EvalRunSummary, Triage
+from .schemas import EvalComparison, EvalRunSummary, RegressionDetail, Triage
 
 Row = dict[str, Any]
 
@@ -43,6 +44,13 @@ ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 class EvaluationError(RuntimeError):
     """Raised when an evaluation cannot be run at all."""
+
+
+MIN_REMAINING_ERROR_REDUCTION = 0.30
+MAX_ORDINARY_REGRESSIONS = 2
+MAX_CLASSIFICATION_ATTEMPTS = 2
+PROTECTED_SEVERITIES = {"critical"}
+TOLERATED_PROTECTED_SEVERITIES = {"critical", "high"}
 
 
 # ---------------------------------------------------------------------------
@@ -87,14 +95,18 @@ async def _predict_all(
 
     async def one(example: Row) -> ExampleGrade:
         async with semaphore:
-            try:
-                predicted: Triage | None = await classify(
-                    llm_client, example["report_text"], prompt_text
-                )
-            except LLMError:
-                # A failed call scores as incorrect rather than aborting the run;
-                # partial results with an honest zero are more useful than none.
-                predicted = None
+            predicted: Triage | None = None
+            for _attempt in range(MAX_CLASSIFICATION_ATTEMPTS):
+                try:
+                    predicted = await classify(
+                        llm_client, example["report_text"], prompt_text
+                    )
+                    break
+                except LLMError:
+                    # Retry once because a transient provider failure must not
+                    # manufacture a regression. Persistent failures still score
+                    # as incorrect so an unreliable prompt cannot be promoted.
+                    continue
         grade = grade_example(
             example_id=example["id"],
             predicted=predicted,
@@ -218,6 +230,8 @@ def _comparison(
     example_count: int,
     previous_is_cached: bool = False,
     candidate_decision: str | None = None,
+    regression_details: list[RegressionDetail] | None = None,
+    remaining_error_reduction: float = 0.0,
 ) -> EvalComparison:
     previous = _summary(previous_run, previous_name)
     active = _summary(active_run, active_name)
@@ -228,6 +242,12 @@ def _comparison(
         severity_delta=active.severity_accuracy - previous.severity_accuracy,
         component_delta=active.component_accuracy - previous.component_accuracy,
         regression_count=active.regression_count,
+        protected_regression_count=sum(
+            detail.protected for detail in (regression_details or [])
+        ),
+        regression_details=regression_details or [],
+        remaining_error_reduction=remaining_error_reduction,
+        ordinary_regression_limit=MAX_ORDINARY_REGRESSIONS,
         improved_count=improved_count,
         example_count=example_count,
         # max(): with a reused previous arm the active run is always the newer
@@ -235,6 +255,78 @@ def _comparison(
         evaluated_at=max(previous.created_at, active.created_at),
         previous_is_cached=previous_is_cached,
         candidate_decision=candidate_decision,
+    )
+
+
+def _regression_pairs(
+    control: list[ExampleGrade], candidate: list[ExampleGrade]
+) -> list[tuple[ExampleGrade, ExampleGrade]]:
+    control_by_id = {grade.example_id: grade for grade in control}
+    return [
+        (control_by_id[grade.example_id], grade)
+        for grade in candidate
+        if grade.example_id in control_by_id
+        and control_by_id[grade.example_id].both_correct
+        and not grade.both_correct
+    ]
+
+
+def _regression_details(
+    examples: list[Row],
+    control: list[ExampleGrade],
+    candidate: list[ExampleGrade],
+) -> list[RegressionDetail]:
+    """Return auditable evidence for every deterministic exact-match regression."""
+    examples_by_id = {example["id"]: example for example in examples}
+    pairs = _regression_pairs(control, candidate)
+
+    def is_protected(candidate_grade: ExampleGrade) -> bool:
+        if candidate_grade.expected.get("severity") not in PROTECTED_SEVERITIES:
+            return False
+        prediction = candidate_grade.predicted
+        return (
+            prediction is None
+            or prediction.get("severity") not in TOLERATED_PROTECTED_SEVERITIES
+            or prediction.get("component")
+            != candidate_grade.expected.get("component")
+        )
+
+    return [
+        RegressionDetail(
+            example_id=candidate_grade.example_id,
+            report_text=examples_by_id[candidate_grade.example_id]["report_text"],
+            expected=candidate_grade.expected,
+            control_prediction=control_grade.predicted,
+            candidate_prediction=candidate_grade.predicted,
+            protected=is_protected(candidate_grade),
+        )
+        for control_grade, candidate_grade in pairs
+    ]
+
+
+def _remaining_error_reduction(control: Accuracy, candidate: Accuracy) -> float:
+    """Fraction of the control's remaining exact-match errors eliminated."""
+    remaining_error = 1.0 - control.overall_accuracy
+    if remaining_error <= 0:
+        return 0.0
+    return (candidate.overall_accuracy - control.overall_accuracy) / remaining_error
+
+
+def _passes_promotion_gate(
+    control: Accuracy,
+    candidate: Accuracy,
+    regression_details: list[RegressionDetail],
+) -> bool:
+    """Apply every deterministic guardrail required to activate a candidate."""
+    protected_regressions = sum(detail.protected for detail in regression_details)
+    ordinary_regressions = len(regression_details) - protected_regressions
+    return (
+        _remaining_error_reduction(control, candidate) + 1e-12
+        >= MIN_REMAINING_ERROR_REDUCTION
+        and ordinary_regressions <= MAX_ORDINARY_REGRESSIONS
+        and protected_regressions == 0
+        and candidate.severity_accuracy >= control.severity_accuracy
+        and candidate.component_accuracy >= control.component_accuracy
     )
 
 
@@ -277,14 +369,19 @@ async def _evaluate_candidate(
     candidate_accuracy = aggregate(candidate_grades)
     regressions = count_regressions(active_grades, candidate_grades)
     improvements = count_improvements(active_grades, candidate_grades)
-    accepted = (
-        candidate_accuracy.overall_accuracy > active_accuracy.overall_accuracy
-        and regressions == 0
+    regression_details = _regression_details(examples, active_grades, candidate_grades)
+    error_reduction = _remaining_error_reduction(active_accuracy, candidate_accuracy)
+    accepted = _passes_promotion_gate(
+        active_accuracy, candidate_accuracy, regression_details
     )
 
     active_run = await _store_run(db, active["id"], active_grades, active_accuracy, 0)
     candidate_run = await _store_run(
-        db, candidate["id"], candidate_grades, candidate_accuracy, regressions
+        db,
+        candidate["id"],
+        candidate_grades,
+        candidate_accuracy,
+        regressions,
     )
     await resolve_candidate(
         db,
@@ -293,7 +390,7 @@ async def _evaluate_candidate(
         accept=accepted,
     )
 
-    decision = "activated" if accepted else "rejected"
+    decision = "promoted" if accepted else "rejected"
     return _comparison(
         active_run,
         active["version_name"],
@@ -302,6 +399,8 @@ async def _evaluate_candidate(
         improvements,
         len(examples),
         candidate_decision=decision,
+        regression_details=regression_details,
+        remaining_error_reduction=error_reduction,
     )
 
 
@@ -411,8 +510,11 @@ async def run_evaluation(
         previous_run = await _store_run(
             db, previous["id"], previous_grades, aggregate(previous_grades), 0
         )
+    previous_accuracy = aggregate(previous_grades)
+    active_accuracy = aggregate(active_grades)
+    regression_details = _regression_details(examples, previous_grades, active_grades)
     active_run = await _store_run(
-        db, active["id"], active_grades, aggregate(active_grades), regressions
+        db, active["id"], active_grades, active_accuracy, regressions
     )
 
     return _comparison(
@@ -423,6 +525,10 @@ async def run_evaluation(
         improvements,
         len(examples),
         previous_is_cached=cached_grades is not None,
+        regression_details=regression_details,
+        remaining_error_reduction=_remaining_error_reduction(
+            previous_accuracy, active_accuracy
+        ),
     )
 
 
@@ -454,6 +560,29 @@ async def _improved_count_for_run(
     )
 
 
+async def _stored_comparison_evidence(
+    db: SupabaseClient,
+    control_run_id: str,
+    candidate_run_id: str,
+) -> tuple[list[RegressionDetail], float]:
+    """Reconstruct regression evidence and error reduction after a reload."""
+    if control_run_id == candidate_run_id:
+        return [], 0.0
+    control_rows, candidate_rows, examples = await asyncio.gather(
+        _results_for_run(db, control_run_id),
+        _results_for_run(db, candidate_run_id),
+        db.select("evaluation_examples", order="id.asc"),
+    )
+    control_grades = _grades_from_stored_results(control_rows)
+    candidate_grades = _grades_from_stored_results(candidate_rows)
+    return (
+        _regression_details(examples, control_grades, candidate_grades),
+        _remaining_error_reduction(
+            aggregate(control_grades), aggregate(candidate_grades)
+        ),
+    )
+
+
 async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
     """Most recent stored evaluation for the current previous/active pair.
 
@@ -467,7 +596,7 @@ async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
     resolved = [
         row
         for row in await list_prompts(db)
-        if row.get("evaluation_decision") in {"activated", "rejected"}
+        if row.get("evaluation_decision") in {"promoted", "rejected"}
         and row.get("evaluated_against_prompt_id")
     ]
     if resolved:
@@ -495,6 +624,9 @@ async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
             improved = await _improved_count_for_run(
                 db, control_run["id"], candidate_run["id"]
             )
+            details, error_reduction = await _stored_comparison_evidence(
+                db, control_run["id"], candidate_run["id"]
+            )
             return _comparison(
                 control_run,
                 control["version_name"],
@@ -503,6 +635,8 @@ async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
                 improved,
                 await _example_count(db),
                 candidate_decision=candidate["evaluation_decision"],
+                regression_details=details,
+                remaining_error_reduction=error_reduction,
             )
 
     previous = await get_previous_prompt(db, active)
@@ -526,6 +660,9 @@ async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
         return None
 
     improved = await _improved_count_for_run(db, previous_run["id"], active_run["id"])
+    details, error_reduction = await _stored_comparison_evidence(
+        db, previous_run["id"], active_run["id"]
+    )
     return _comparison(
         previous_run,
         previous["version_name"],
@@ -533,6 +670,8 @@ async def get_latest_evaluation(db: SupabaseClient) -> EvalComparison | None:
         active["version_name"],
         improved,
         await _example_count(db),
+        regression_details=details,
+        remaining_error_reduction=error_reduction,
     )
 
 
