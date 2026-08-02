@@ -45,7 +45,7 @@ export default function MetricsPanel({ evaluation }) {
   return (
     <div className="space-y-1 text-[14px]">
       <Row
-        label={`previous  ${previous.version_name}`}
+        label={`${decision ? 'active' : 'previous'}  ${previous.version_name}`}
         value={formatPercent(previous.overall_accuracy)}
       />
       <Row
@@ -108,7 +108,7 @@ export default function MetricsPanel({ evaluation }) {
                 <p className="text-term-fg">{detail.report_text}</p>
                 <p className="text-term-dim">
                   expected {detail.expected?.severity ?? '--'} /{' '}
-                  {detail.expected?.component ?? '--'} · control{' '}
+                  {detail.expected?.component ?? '--'} · active{' '}
                   {detail.control_prediction?.severity ?? '--'} /{' '}
                   {detail.control_prediction?.component ?? '--'} · candidate{' '}
                   {detail.candidate_prediction?.severity ?? '--'} /{' '}
@@ -161,7 +161,7 @@ export default function MetricsPanel({ evaluation }) {
       */}
       {!unchanged && (
         <Row
-          label="previous measured"
+          label={`${decision ? 'active' : 'previous'} measured`}
           value={formatTimestamp(previous.created_at)}
           valueClass="text-term-dim"
         />
@@ -184,7 +184,7 @@ export default function MetricsPanel({ evaluation }) {
       {previousIsCached && !unchanged && (
         <p className="pt-2 text-[13px] leading-relaxed text-term-faint">
           <span># </span>
-          previous row reused from its run at{' '}
+          {decision ? 'active' : 'previous'} row reused from its run at{' '}
           {formatTimestamp(previous.created_at)} - not re-scored
         </p>
       )}

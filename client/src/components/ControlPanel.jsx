@@ -153,7 +153,7 @@ export default function ControlPanel({
             )}
           </div>
         )}
-        <MetricsPanel evaluation={evaluation} />
+        {!evaluating && <MetricsPanel evaluation={evaluation} />}
       </section>
     </aside>
   )

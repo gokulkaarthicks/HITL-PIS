@@ -1,8 +1,9 @@
 """Held-out evaluation and candidate deployment gating.
 
-Candidate decisions freshly score the live prompt and candidate against the
-same `evaluation_examples` with identical decoding settings. Promotion uses
-only deterministic exact-match metrics and explicit guardrails.
+Candidate decisions score the candidate against a fingerprinted live-prompt
+control over the same `evaluation_examples`. The control is reused only while
+the effective prompt, model settings, output schema, and held-out set match.
+Promotion uses deterministic exact-match metrics and explicit guardrails.
 
 When no candidate exists, the legacy active-versus-previous comparison remains
 available and may reuse a stored previous arm. Scoring itself is deterministic
@@ -12,6 +13,8 @@ pure Python in `grading.py`; no model judges accuracy.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -26,7 +29,7 @@ from .grading import (
     grade_example,
 )
 from .http_client import AsyncHTTPClient
-from .llm import LLMError, classify
+from .llm import LLMError, TRIAGE_JSON_SCHEMA, build_system_prompt, classify
 from .prompt_service import (
     get_active_prompt,
     get_candidate_prompt,
@@ -51,6 +54,7 @@ MAX_ORDINARY_REGRESSIONS = 2
 MAX_CLASSIFICATION_ATTEMPTS = 2
 PROTECTED_SEVERITIES = {"critical"}
 TOLERATED_PROTECTED_SEVERITIES = {"critical", "high"}
+EVALUATION_CACHE_VERSION = 1
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +133,7 @@ async def _store_run(
     grades: list[ExampleGrade],
     accuracy: Accuracy,
     regression_count: int,
+    cache_fingerprint: str,
 ) -> Row:
     created = await db.insert(
         "evaluation_runs",
@@ -138,6 +143,7 @@ async def _store_run(
             "component_accuracy": accuracy.component_accuracy,
             "overall_accuracy": accuracy.overall_accuracy,
             "regression_count": regression_count,
+            "cache_fingerprint": cache_fingerprint,
         },
     )
     if not created:
@@ -195,15 +201,42 @@ def _grades_from_stored_results(rows: list[Row]) -> list[ExampleGrade]:
     ]
 
 
-def _is_cache_valid(stored: list[Row], examples: list[Row]) -> bool:
-    """A cached arm is only comparable if it covers exactly today's examples.
+def _evaluation_fingerprint(prompt_text: str, examples: list[Row]) -> str:
+    """Identify every input that can change an evaluation arm's predictions."""
+    payload = {
+        "cache_version": EVALUATION_CACHE_VERSION,
+        "effective_prompt": build_system_prompt(prompt_text),
+        "model": settings.openrouter_model,
+        "base_url": settings.openrouter_base_url,
+        "temperature": settings.llm_temperature,
+        "seed": settings.llm_seed,
+        "response_schema": TRIAGE_JSON_SCHEMA,
+        "examples": [
+            {
+                "id": example["id"],
+                "report_text": example["report_text"],
+                "expected_severity": example["expected_severity"],
+                "expected_component": example["expected_component"],
+            }
+            for example in sorted(examples, key=lambda row: str(row["id"]))
+        ],
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
-    Adding or removing an evaluation example changes the denominator, so a score
-    computed over the old set cannot be compared against a fresh one. This is
-    the only staleness the code can detect; a changed model or seed cannot be,
-    which is what the `force` flag exists for.
-    """
-    return {r["evaluation_example_id"] for r in stored} == {e["id"] for e in examples}
+
+def _is_cache_valid(
+    run: Row,
+    stored: list[Row],
+    examples: list[Row],
+    expected_fingerprint: str,
+) -> bool:
+    """Require both a matching fingerprint and complete per-example evidence."""
+    return run.get("cache_fingerprint") == expected_fingerprint and {
+        r["evaluation_example_id"] for r in stored
+    } == {e["id"] for e in examples}
 
 
 # ---------------------------------------------------------------------------
@@ -338,32 +371,65 @@ async def _evaluate_candidate(
     candidate: Row,
     *,
     semaphore: asyncio.Semaphore,
+    force: bool,
     on_progress: ProgressCallback | None,
 ) -> EvalComparison:
     """Evaluate a candidate against the live prompt, then resolve it atomically.
 
-    Both arms are always scored fresh. A deployment decision must never mix a
-    cached score from another model/configuration with a fresh candidate score.
+    The active arm is reused only when its fingerprint and complete stored
+    evidence match. The candidate arm is always scored fresh.
     """
-    progress = _Progress(len(examples) * 2, on_progress)
-    active_grades, candidate_grades = await asyncio.gather(
-        _predict_all(
-            llm_client,
-            examples,
-            active["prompt_text"],
-            semaphore=semaphore,
-            arm="current",
-            progress=progress,
-        ),
-        _predict_all(
+    active_fingerprint = _evaluation_fingerprint(active["prompt_text"], examples)
+    candidate_fingerprint = _evaluation_fingerprint(
+        candidate["prompt_text"], examples
+    )
+    active_run: Row | None = None
+    active_grades: list[ExampleGrade] | None = None
+    active_is_cached = False
+
+    if not force:
+        latest_active_run = await _latest_run_for(db, active["id"])
+        if latest_active_run is not None:
+            stored = await _results_for_run(db, latest_active_run["id"])
+            if _is_cache_valid(
+                latest_active_run, stored, examples, active_fingerprint
+            ):
+                active_run = latest_active_run
+                active_grades = _grades_from_stored_results(stored)
+                active_is_cached = True
+
+    progress = _Progress(
+        len(examples) if active_grades is not None else len(examples) * 2,
+        on_progress,
+    )
+    if active_grades is None:
+        active_grades, candidate_grades = await asyncio.gather(
+            _predict_all(
+                llm_client,
+                examples,
+                active["prompt_text"],
+                semaphore=semaphore,
+                arm="active",
+                progress=progress,
+            ),
+            _predict_all(
+                llm_client,
+                examples,
+                candidate["prompt_text"],
+                semaphore=semaphore,
+                arm="candidate",
+                progress=progress,
+            ),
+        )
+    else:
+        candidate_grades = await _predict_all(
             llm_client,
             examples,
             candidate["prompt_text"],
             semaphore=semaphore,
             arm="candidate",
             progress=progress,
-        ),
-    )
+        )
 
     active_accuracy = aggregate(active_grades)
     candidate_accuracy = aggregate(candidate_grades)
@@ -375,13 +441,22 @@ async def _evaluate_candidate(
         active_accuracy, candidate_accuracy, regression_details
     )
 
-    active_run = await _store_run(db, active["id"], active_grades, active_accuracy, 0)
+    if active_run is None:
+        active_run = await _store_run(
+            db,
+            active["id"],
+            active_grades,
+            active_accuracy,
+            0,
+            active_fingerprint,
+        )
     candidate_run = await _store_run(
         db,
         candidate["id"],
         candidate_grades,
         candidate_accuracy,
         regressions,
+        candidate_fingerprint,
     )
     await resolve_candidate(
         db,
@@ -398,6 +473,7 @@ async def _evaluate_candidate(
         candidate["version_name"],
         improvements,
         len(examples),
+        previous_is_cached=active_is_cached,
         candidate_decision=decision,
         regression_details=regression_details,
         remaining_error_reduction=error_reduction,
@@ -416,9 +492,8 @@ async def run_evaluation(
 ) -> EvalComparison:
     """Score the active prompt, comparing against the previous version.
 
-    `force=True` re-scores the previous arm instead of reusing its stored run --
-    needed after changing the model or decoding settings, which invalidate the
-    cache in a way that cannot be detected automatically.
+    Fingerprints automatically invalidate stale stored arms. `force=True`
+    bypasses an otherwise valid cache for an explicit fresh measurement.
     """
     examples = await db.select("evaluation_examples", order="id.asc")
     if not examples:
@@ -439,6 +514,7 @@ async def run_evaluation(
             active,
             candidate,
             semaphore=semaphore,
+            force=force,
             on_progress=on_progress,
         )
 
@@ -454,7 +530,14 @@ async def run_evaluation(
             arm="active",
             progress=progress,
         )
-        run = await _store_run(db, active["id"], grades, aggregate(grades), 0)
+        run = await _store_run(
+            db,
+            active["id"],
+            grades,
+            aggregate(grades),
+            0,
+            _evaluation_fingerprint(active["prompt_text"], examples),
+        )
         return _comparison(
             run, active["version_name"], run, active["version_name"], 0, len(examples)
         )
@@ -462,11 +545,14 @@ async def run_evaluation(
     # Try to reuse the previous version's stored run.
     cached_grades: list[ExampleGrade] | None = None
     previous_run: Row | None = None
+    previous_fingerprint = _evaluation_fingerprint(previous["prompt_text"], examples)
     if not force:
         candidate = await _latest_run_for(db, previous["id"])
         if candidate is not None:
             stored = await _results_for_run(db, candidate["id"])
-            if _is_cache_valid(stored, examples):
+            if _is_cache_valid(
+                candidate, stored, examples, previous_fingerprint
+            ):
                 cached_grades = _grades_from_stored_results(stored)
                 previous_run = candidate
 
@@ -508,13 +594,23 @@ async def run_evaluation(
 
     if previous_run is None:
         previous_run = await _store_run(
-            db, previous["id"], previous_grades, aggregate(previous_grades), 0
+            db,
+            previous["id"],
+            previous_grades,
+            aggregate(previous_grades),
+            0,
+            previous_fingerprint,
         )
     previous_accuracy = aggregate(previous_grades)
     active_accuracy = aggregate(active_grades)
     regression_details = _regression_details(examples, previous_grades, active_grades)
     active_run = await _store_run(
-        db, active["id"], active_grades, active_accuracy, regressions
+        db,
+        active["id"],
+        active_grades,
+        active_accuracy,
+        regressions,
+        _evaluation_fingerprint(active["prompt_text"], examples),
     )
 
     return _comparison(

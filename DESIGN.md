@@ -163,10 +163,12 @@ first one improved, and any delta would then be inseparable from judge drift.
 
 ### Two arms, one variable
 
-Every candidate decision freshly scores the same held-out examples under the
-live prompt and candidate, with identical decoding settings (`temperature=0`,
-fixed `seed`, same model). The prompt text is the only variable, which licenses
-attributing the delta to the candidate.
+Every candidate decision scores the same held-out examples under the live
+prompt and candidate. The live arm is reused from stored per-example results
+only when a SHA-256 fingerprint matches the effective runtime prompt, model and
+endpoint, decoding settings, response schema, and complete evaluation dataset.
+The candidate is always scored fresh. A fingerprint mismatch or an explicit
+forced run re-scores the live arm before comparison.
 
 The control is the current live version rather than a fixed `v1-baseline` because
 the operationally useful question is "did the last improvement help, and did it
@@ -191,11 +193,13 @@ rebuilt from (§2); it no longer has anything to do with the comparison arm.
 
 ### Candidate deployment gate
 
-Candidate decisions never reuse a cached control arm. Both prompts are scored
-in the same run so a model, seed, or decoding change cannot be mistaken for a
-prompt improvement. The candidate is promoted only when overall accuracy is
-strictly higher and the regression count is zero. Otherwise it is retained with
-status `rejected`, and the live prompt remains unchanged.
+Candidate decisions reuse the active arm only through the fingerprinted cache,
+reducing ordinary candidate evaluations from 36 LLM calls to 18 while keeping
+the control score stable. A promoted candidate's per-example results become the
+next active cache. The candidate must reduce remaining exact-match errors by at
+least 30%, stay within the ordinary regression limit, produce no protected
+regressions, and avoid severity or component accuracy decline. Otherwise it is
+retained with status `rejected`, and the live prompt remains unchanged.
 
 The final state transition is a Postgres RPC. It checks that the candidate is
 still pending and that the evaluated control is still active before changing

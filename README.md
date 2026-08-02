@@ -15,10 +15,10 @@ bug report ──> LLM triage ──> human correction ──> stored
             candidate prompt (few-shot + calibration)
                           │
                           v
-       fresh held-out evaluation: live prompt vs candidate
+    held-out evaluation: cached live prompt vs fresh candidate
                           │
-             positive gain + zero regressions?
-                   activate / reject
+           every deterministic promotion gate passes?
+                    promote / reject
 ```
 
 **Stack:** React + Vite + Tailwind · FastAPI · Supabase Postgres · OpenRouter
@@ -58,10 +58,10 @@ bug report ──> LLM triage ──> human correction ──> stored
    `prompt_versions`. A stable operating structure and decision process live in
    `prompt_service.py`; calibration rules and reference cases are generated
    deterministically from the current human corrections.
-5. **Evaluate and gate** - "Evaluate Candidate" freshly scores the live prompt
-   and candidate on the same held-out set. The candidate is promoted atomically
-   only when overall accuracy increases and regressions are zero; otherwise it is
-   retained as rejected evidence and the live prompt is unchanged.
+5. **Evaluate and gate** - "Evaluate Candidate" reuses a fingerprint-matched
+   active score and freshly scores the candidate on the same held-out set. The
+   candidate is promoted atomically only when every deterministic gate passes;
+   otherwise it is retained as rejected evidence and the live prompt is unchanged.
 
 The split in step 1 is the point of the whole design: the improved prompt is
 built from the review pool and scored on text it has never seen, so a gain is a
@@ -275,9 +275,10 @@ URL.
 5. Click **Build Candidate**. A new version (`v2-improved`) is generated from
    your corrections but remains inactive.
 6. Click **Evaluate Candidate**. The metrics panel shows live-versus-candidate
-   accuracy, delta, regression count, and the activation decision. A positive
-   gain with zero regressions activates the candidate; every other result keeps
-   the current prompt live.
+   accuracy, delta, regression count, and the promotion decision. A candidate
+   must reduce the active prompt's remaining errors by at least 30%, avoid
+   protected regressions and per-axis decline, and stay within the ordinary
+   regression limit; otherwise the current prompt remains live.
 
 Corrections that *disagree* with the model teach the most, so a demo where you
 deliberately fix the model's weak spots (under-called severities, everything
@@ -298,7 +299,7 @@ labelled `backend`) shows the largest, most legible gain.
 | `GET` | `/prompts/active` | Active version + available correction count |
 | `POST` | `/prompts/improve` | Build one inactive candidate version |
 | `GET` | `/eval/examples` | The held-out gold set |
-| `POST` | `/eval/run` | With a candidate: freshly score live vs candidate and atomically activate or reject it. Otherwise score the current active/previous comparison. |
+| `POST` | `/eval/run` | With a candidate: reuse a fingerprint-matched active evaluation, freshly score the candidate, and atomically promote or reject it. Otherwise score the current active/previous comparison. |
 | `POST` | `/eval/run/stream` | Same work, streamed as newline-delimited JSON: `{"type":"progress","completed":n,"total":m,"arm":…}` per example, then one `{"type":"result"…}` or `{"type":"error"…}`. Also accepts `?force=true` |
 | `GET` | `/eval/latest` | Last stored comparison (`204` if none yet) |
 | `POST` | `/admin/reset` | Transactional reset to the 93-report unreviewed baseline. Requires `{"confirmation":"RESET"}` |
@@ -334,7 +335,7 @@ its state.
 cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest
 ```
 
-56 tests covering the parts where correctness actually matters:
+72 tests covering the parts where correctness actually matters:
 
 - **`test_grading.py`** - exact-match scoring, case/whitespace normalization,
   failed LLM calls counting as incorrect, per-axis accuracy, regression and
@@ -342,9 +343,9 @@ cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -
 - **`test_prompt_service.py`** - few-shot selection prioritising disagreements,
   determinism, confusion tallies, prompt assembly, baseline pinning.
 - **`test_evaluation_loop.py`** - the whole loop against an in-memory Supabase
-  and a scripted model: both arms are scored fresh for a candidate, regressions
-  reject activation, a safe gain activates atomically, and `/eval/latest` reads
-  accepted or rejected evidence back from stored rows.
+  and a scripted model: fingerprinted active results are reused, stale caches
+  are invalidated, guardrails reject unsafe candidates, safe gains promote
+  atomically, and `/eval/latest` reads decisions from stored rows.
 - **`test_config.py` / `test_cors.py`** - Cloudflare runtime bindings override
   settings safely, malformed optional values retain defaults, and deployed CORS
   origins are applied without exposing secrets to the frontend.
@@ -426,9 +427,9 @@ returns error 1102 during evaluation, the production solution is a queued or
 batched evaluation rather than increasing concurrency.
 
 The default OpenRouter model is also free, but free accounts are limited to 50
-model requests/day. A candidate decision deliberately uses 36 calls because both
-arms are scored fresh; deployment safety takes priority over reusing a possibly
-incompatible cached score.
+model requests/day. After the active arm is fingerprinted, an ordinary candidate
+decision uses 18 calls. It uses 36 only when the cache is absent, explicitly
+forced, or invalidated by changed evaluation inputs.
 
 ---
 
@@ -439,9 +440,9 @@ incompatible cached score.
   API is unauthenticated.
 - **Every correction is ground truth.** The system treats a saved correction as
   correct without adjudication, agreement scoring, or conflict resolution.
-- **The candidate is compared with the current live version.** Both arms run
-  fresh under the same model and decoding settings. Cumulative progress against
-  v1 is not reported.
+- **The candidate is compared with the current live version.** Its fingerprinted
+  per-example results are reused while all known evaluation inputs match.
+  Cumulative progress against v1 is not reported.
 - **`v1-baseline` remains the composition root.** Improved versions are always
   rebuilt from it plus the full correction set, never by appending to the
   previous improved prompt. This is separate from the comparison arm.
@@ -462,11 +463,12 @@ incompatible cached score.
 - **Rationale quality is not scored.** It is stored and shown for manual
   inspection only. Scoring free text would require a second model, which this
   system deliberately avoids - accuracy must stay deterministic and auditable.
-- **Evaluation cost grows linearly.** A candidate decision makes two calls per
-  example (36 total for this gold set). Cheap on this model, but not free.
+- **Evaluation cost grows linearly.** A normal candidate decision makes one call
+  per example (18 total); an invalidated or forced control doubles that to 36.
 - **Improvement is not guaranteed to be monotonic.** More corrections can make
-  a candidate worse. The gate rejects a non-positive delta or any regression,
-  but there is not yet a manual rollback control for an already active version.
+  a candidate worse. The deterministic gate rejects insufficient error reduction,
+  excessive or protected regressions, and per-axis decline, but there is not yet
+  a manual rollback control for an already active version.
 - **Only one candidate may wait for evaluation.** The partial unique index
   rejects concurrent candidate creation; the client must evaluate or reject the
   existing candidate before building another one.

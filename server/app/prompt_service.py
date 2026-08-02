@@ -18,6 +18,7 @@ from typing import Any
 
 from .db import SupabaseClient, SupabaseError
 from .grading import normalize_label
+from .prompt_contract import ENGLISH_OUTPUT_INSTRUCTION
 
 BASELINE_VERSION_NAME = "v1-baseline"
 
@@ -28,7 +29,10 @@ DECISION_PROCESS = """## Decision process
    whether a practical workaround exists.
 3. Choose the component that owns the likely root cause, not merely the screen
    where the symptom appears. Use `unknown` when the report is too vague.
-4. Give a concise rationale that cites the evidence driving both labels."""
+4. Give a concise rationale that cites the evidence driving both labels.
+5. {english_output_instruction}""".format(
+    english_output_instruction=ENGLISH_OUTPUT_INSTRUCTION
+)
 
 Row = dict[str, Any]
 

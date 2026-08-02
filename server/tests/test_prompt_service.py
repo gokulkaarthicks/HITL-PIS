@@ -164,6 +164,7 @@ def test_improved_prompt_contains_baseline_calibration_and_examples():
     assert "## Role, task, and output contract" in text
     assert BASELINE in text
     assert "## Decision process" in text
+    assert "Write the rationale in English only" in text
     assert "Calibration from human review" in text
     assert "Prefer `critical` over `low`" in text
     assert "Distinctive human-verified reference cases" in text
