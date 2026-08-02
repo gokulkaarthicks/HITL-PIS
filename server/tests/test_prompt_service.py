@@ -6,9 +6,9 @@ from app.prompt_service import (
     build_improved_prompt_text,
     get_baseline_prompt,
     get_previous_prompt,
+    group_reference_corrections,
     improve_prompt,
     next_version_name,
-    select_few_shot_corrections,
     summarize_confusions,
 )
 from tests.fakes import FakeSupabase
@@ -45,8 +45,8 @@ def test_confirmations_are_not_used_as_reference_cases():
         correction("1", "agreed report", ("low", "frontend"), ("low", "frontend")),
         correction("2", "fixed report", ("low", "backend"), ("critical", "payments")),
     ]
-    selected = select_few_shot_corrections(rows, limit=2)
-    assert [r["id"] for r in selected] == ["2"]
+    groups = group_reference_corrections(rows)
+    assert [primary["id"] for primary, _nuances in groups] == ["2"]
 
 
 def test_selection_prefers_diverse_corrected_label_pairs():
@@ -55,11 +55,27 @@ def test_selection_prefers_diverse_corrected_label_pairs():
         correction("2", "second auth", ("low", "backend"), ("high", "auth")),
         correction("3", "payment", ("low", "backend"), ("critical", "payments")),
     ]
-    selected = select_few_shot_corrections(rows, limit=2)
-    assert [r["id"] for r in selected] == ["3", "1"]
+    groups = group_reference_corrections(rows)
+    assert [primary["id"] for primary, _nuances in groups] == ["3", "1"]
 
 
-def test_selection_respects_the_limit():
+def test_same_outcome_is_rendered_as_one_example_with_nuances():
+    rows = [
+        correction("1", "first auth case", ("low", "backend"), ("high", "auth")),
+        correction(
+            "2", "second auth case", ("medium", "backend"), ("high", "auth")
+        ),
+    ]
+
+    text = build_improved_prompt_text(BASELINE, rows)
+
+    assert text.count("### Example") == 1
+    assert "first auth case" in text
+    assert "second auth case" in text
+    assert "Related reviewed nuances with the same verified labels" in text
+
+
+def test_selection_includes_every_distinct_corrected_pair():
     pairs = [
         ("high", "auth"),
         ("critical", "payments"),
@@ -72,7 +88,7 @@ def test_selection_respects_the_limit():
         correction(str(i), f"report {i}", ("low", "backend"), pair)
         for i, pair in enumerate(pairs)
     ]
-    assert len(select_few_shot_corrections(rows, limit=5)) == 5
+    assert len(group_reference_corrections(rows)) == 6
 
 
 def test_selection_is_deterministic_regardless_of_input_order():
@@ -87,8 +103,10 @@ def test_selection_is_deterministic_regardless_of_input_order():
             "3", "c", ("low", "backend"), ("high", "auth"), "2026-01-03T00:00:00Z"
         ),
     ]
-    forward = [r["id"] for r in select_few_shot_corrections(rows, 3)]
-    backward = [r["id"] for r in select_few_shot_corrections(list(reversed(rows)), 3)]
+    forward = [r["id"] for r, _ in group_reference_corrections(rows)]
+    backward = [
+        r["id"] for r, _ in group_reference_corrections(list(reversed(rows)))
+    ]
     assert forward == backward == ["1"]
 
 
@@ -97,20 +115,20 @@ def test_stronger_disagreement_wins_for_the_same_corrected_pair():
         correction("1", "one axis", ("medium", "auth"), ("high", "auth")),
         correction("2", "two axes", ("low", "backend"), ("high", "auth")),
     ]
-    assert [r["id"] for r in select_few_shot_corrections(rows, 5)] == ["2"]
+    assert [r["id"] for r, _ in group_reference_corrections(rows)] == ["2"]
 
 
 def test_rows_without_usable_human_labels_are_dropped():
     bad = correction("1", "x", ("low", "backend"), ("high", "auth"))
     bad["human_corrected_json"] = {"severity": "", "component": "", "rationale": ""}
-    assert select_few_shot_corrections([bad], 5) == []
+    assert group_reference_corrections([bad]) == []
 
 
 def test_placeholder_rationale_is_excluded_from_worked_examples():
     row = correction("1", "x", ("low", "backend"), ("high", "auth"))
     row["human_corrected_json"]["rationale"] = "x"
-    assert select_few_shot_corrections([row], 5) == []
-    text = build_improved_prompt_text(BASELINE, [row], 5)
+    assert group_reference_corrections([row]) == []
+    text = build_improved_prompt_text(BASELINE, [row])
     assert "Calibration from human review" in text
     assert "Distinctive human-verified reference cases" not in text
 
@@ -140,7 +158,7 @@ def test_improved_prompt_contains_baseline_calibration_and_examples():
             "1", "Checkout is down", ("low", "backend"), ("critical", "payments")
         )
     ]
-    text = build_improved_prompt_text(BASELINE, rows, max_examples=5)
+    text = build_improved_prompt_text(BASELINE, rows)
 
     assert text.startswith("# Bug report triage operating prompt")
     assert "## Role, task, and output contract" in text
@@ -159,14 +177,14 @@ def test_improved_prompt_is_byte_identical_for_the_same_corrections():
         correction("1", "a", ("low", "backend"), ("high", "auth")),
         correction("2", "b", ("low", "frontend"), ("low", "frontend")),
     ]
-    assert build_improved_prompt_text(BASELINE, rows, 5) == build_improved_prompt_text(
-        BASELINE, rows, 5
+    assert build_improved_prompt_text(BASELINE, rows) == build_improved_prompt_text(
+        BASELINE, rows
     )
 
 
 def test_improved_prompt_omits_calibration_when_model_was_never_wrong():
     rows = [correction("1", "a", ("low", "frontend"), ("low", "frontend"))]
-    text = build_improved_prompt_text(BASELINE, rows, 5)
+    text = build_improved_prompt_text(BASELINE, rows)
     assert "Calibration from human review" not in text
     assert "Distinctive human-verified reference cases" not in text
 

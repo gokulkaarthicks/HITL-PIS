@@ -27,10 +27,15 @@ export default function MetricsPanel({ evaluation }) {
     active,
     overall_delta: delta,
     regression_count: regressions,
+    protected_regression_count: protectedRegressions = 0,
+    remaining_error_reduction: errorReduction = 0,
+    ordinary_regression_limit: ordinaryRegressionLimit = 2,
     previous_is_cached: previousIsCached,
   } = evaluation
   const unchanged = previous.prompt_version_id === active.prompt_version_id
   const decision = evaluation.candidate_decision
+  const regressionDetails = evaluation.regression_details ?? []
+  const ordinaryRegressions = regressions - protectedRegressions
 
   const deltaClass =
     delta > 0 ? 'text-ansi-green' : delta < 0 ? 'text-ansi-red' : 'text-term-dim'
@@ -54,12 +59,65 @@ export default function MetricsPanel({ evaluation }) {
         value={regressions}
         valueClass={regressionClass}
       />
+      {!unchanged && (
+        <Row
+          label="error reduction (≥30%)"
+          value={formatPercent(errorReduction)}
+          valueClass={errorReduction >= 0.3 ? 'text-ansi-green' : 'text-ansi-red'}
+        />
+      )}
+      {decision && (
+        <>
+          <Row
+            label="ordinary regression budget"
+            value={`${ordinaryRegressions} / ${ordinaryRegressionLimit}`}
+            valueClass={
+              ordinaryRegressions <= ordinaryRegressionLimit
+                ? 'text-ansi-green'
+                : 'text-ansi-red'
+            }
+          />
+          <Row
+            label="protected regressions"
+            value={protectedRegressions}
+            valueClass={protectedRegressions === 0 ? 'text-ansi-green' : 'text-ansi-red'}
+          />
+        </>
+      )}
       {decision && (
         <Row
           label="decision"
           value={decision}
-          valueClass={decision === 'activated' ? 'text-ansi-green' : 'text-ansi-red'}
+          valueClass={decision === 'promoted' ? 'text-ansi-green' : 'text-ansi-red'}
         />
+      )}
+
+      {regressionDetails.length > 0 && (
+        <details open className="mt-2 border border-term-line bg-term-bg p-2 text-[12px] leading-relaxed">
+          <summary className="cursor-pointer text-term-dim">
+            regression details ({regressionDetails.length})
+          </summary>
+          <div className="mt-2 space-y-3">
+            {regressionDetails.map((detail, index) => (
+              <div key={detail.example_id} className="space-y-1">
+                <p
+                  className={detail.protected ? 'text-ansi-red' : 'text-ansi-yellow'}
+                >
+                  {index + 1}. {detail.protected ? 'protected' : 'ordinary'} regression
+                </p>
+                <p className="text-term-fg">{detail.report_text}</p>
+                <p className="text-term-dim">
+                  expected {detail.expected?.severity ?? '--'} /{' '}
+                  {detail.expected?.component ?? '--'} · control{' '}
+                  {detail.control_prediction?.severity ?? '--'} /{' '}
+                  {detail.control_prediction?.component ?? '--'} · candidate{' '}
+                  {detail.candidate_prediction?.severity ?? '--'} /{' '}
+                  {detail.candidate_prediction?.component ?? '--'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       <div className="pt-2" />
@@ -69,14 +127,26 @@ export default function MetricsPanel({ evaluation }) {
         value={`${formatPercent(previous.severity_accuracy)} → ${formatPercent(
           active.severity_accuracy,
         )}`}
-        valueClass="text-term-dim tabular-nums"
+        valueClass={
+          decision
+            ? evaluation.severity_delta >= 0
+              ? 'text-ansi-green tabular-nums'
+              : 'text-ansi-red tabular-nums'
+            : 'text-term-dim tabular-nums'
+        }
       />
       <Row
         label="component"
         value={`${formatPercent(previous.component_accuracy)} → ${formatPercent(
           active.component_accuracy,
         )}`}
-        valueClass="text-term-dim tabular-nums"
+        valueClass={
+          decision
+            ? evaluation.component_delta >= 0
+              ? 'text-ansi-green tabular-nums'
+              : 'text-ansi-red tabular-nums'
+            : 'text-term-dim tabular-nums'
+        }
       />
       <Row
         label="newly fixed"

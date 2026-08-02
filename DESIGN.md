@@ -93,8 +93,9 @@ An improved prompt is assembled from five explicit sections:
 3. **A calibration section** - a deduplicated tally of how reviewers changed the model's
    labels, most frequent first:
    `- Prefer critical over high in matching cases (3 reviewed corrections).`
-4. **Distinctive reference cases** - up to `MAX_FEW_SHOT_EXAMPLES` (default 6)
-   high-signal disagreement pairs with explanatory rationales, rendered as JSON.
+4. **Distinctive reference cases** - one primary example for every corrected
+   label pair, with additional corrections for that outcome folded into concise
+   reasoning nuances instead of repeated full examples.
 5. **A final execution instruction** - apply the evidence to the incoming report
    independently rather than copying an example mechanically.
 
@@ -192,7 +193,7 @@ rebuilt from (§2); it no longer has anything to do with the comparison arm.
 
 Candidate decisions never reuse a cached control arm. Both prompts are scored
 in the same run so a model, seed, or decoding change cannot be mistaken for a
-prompt improvement. The candidate is activated only when overall accuracy is
+prompt improvement. The candidate is promoted only when overall accuracy is
 strictly higher and the regression count is zero. Otherwise it is retained with
 status `rejected`, and the live prompt remains unchanged.
 

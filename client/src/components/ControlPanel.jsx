@@ -96,7 +96,7 @@ export default function ControlPanel({
           <div className="border border-ansi-yellow/40 bg-term-bg p-2 text-[13px] leading-relaxed">
             <p className="text-ansi-yellow">candidate {candidate.version_name}</p>
             <p className="text-term-dim">
-              inactive until evaluation shows a positive gain with zero regressions
+              inactive until every deterministic promotion gate passes
             </p>
           </div>
         )}

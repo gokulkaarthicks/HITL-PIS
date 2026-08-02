@@ -16,7 +16,6 @@ import json
 from collections import Counter
 from typing import Any
 
-from .config import settings
 from .db import SupabaseClient, SupabaseError
 from .grading import normalize_label
 
@@ -168,16 +167,18 @@ def _teaching_signal_sort_key(row: Row) -> tuple[int, int, tuple[str, str]]:
     return -changed_axes, -severity_distance, _correction_sort_key(row)
 
 
-def select_few_shot_corrections(corrections: list[Row], limit: int) -> list[Row]:
-    """Pick which corrections become worked examples.
+def group_reference_corrections(
+    corrections: list[Row],
+) -> list[tuple[Row, list[Row]]]:
+    """Group every useful disagreement by its verified label outcome.
 
     Only corrections where the human changed the model are eligible. They are
-    ranked by changed axes and severity distance, then limited to one example
-    per corrected severity/component pair. Confirmations and repeated outcomes
-    remain represented by aggregate calibration instead of consuming examples.
+    ranked by changed axes and severity distance. The strongest correction for
+    each corrected severity/component pair becomes the primary example; every
+    additional correction for that same pair becomes a related nuance.
 
     Rows without an explanatory rationale still influence aggregate calibration
-    but are not suitable as full worked examples.
+    but are not suitable as reference evidence.
 
     Ordering is deterministic so the same correction set always produces
     byte-identical prompt text.
@@ -192,17 +193,14 @@ def select_few_shot_corrections(corrections: list[Row], limit: int) -> list[Row]
         if original != corrected:
             disagreements.append(row)
 
-    selected: list[Row] = []
-    represented_pairs: set[tuple[str, str]] = set()
+    grouped: dict[tuple[str, str], list[Row]] = {}
     for row in sorted(disagreements, key=_teaching_signal_sort_key):
-        if len(selected) >= limit:
-            break
-        pair = _label_pair(row.get("human_corrected_json"))
-        if pair in represented_pairs:
-            continue
-        selected.append(row)
-        represented_pairs.add(pair)
-    return selected
+        grouped.setdefault(_label_pair(row.get("human_corrected_json")), []).append(
+            row
+        )
+
+    groups = [(rows[0], rows[1:]) for rows in grouped.values()]
+    return sorted(groups, key=lambda group: _teaching_signal_sort_key(group[0]))
 
 
 def summarize_confusions(corrections: list[Row]) -> tuple[list[str], list[str]]:
@@ -234,11 +232,15 @@ def summarize_confusions(corrections: list[Row]) -> tuple[list[str], list[str]]:
     return render(severity_changes), render(component_changes)
 
 
-def build_improved_prompt_text(
-    baseline_text: str, corrections: list[Row], max_examples: int
-) -> str:
+def _compact(value: object, limit: int) -> str:
+    """Collapse whitespace and bound one embedded evidence fragment."""
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def build_improved_prompt_text(baseline_text: str, corrections: list[Row]) -> str:
     """Compose a concise operating prompt. Pure and deterministic."""
-    examples = select_few_shot_corrections(corrections, max_examples)
+    reference_groups = group_reference_corrections(corrections)
     severity_lines, component_lines = summarize_confusions(corrections)
 
     sections: list[str] = [
@@ -261,12 +263,12 @@ def build_improved_prompt_text(
             "when the new report has matching evidence.\n\n" + "\n\n".join(guidance)
         )
 
-    if examples:
+    if reference_groups:
         rendered = []
-        for index, row in enumerate(examples, start=1):
+        for index, (row, nuances) in enumerate(reference_groups, start=1):
             corrected = row.get("human_corrected_json") or {}
             report_text = str(row.get("report_text", "")).strip()
-            rendered.append(
+            example = (
                 f"### Example {index}\n\nReport:\n{report_text}\n\n"
                 "Verified classification:\n"
                 + json.dumps(
@@ -278,11 +280,26 @@ def build_improved_prompt_text(
                     indent=2,
                 )
             )
+            if nuances:
+                nuance_lines = []
+                for nuance in nuances:
+                    payload = nuance.get("human_corrected_json") or {}
+                    nuance_lines.append(
+                        f"- {_compact(nuance.get('report_text'), 240)} "
+                        f"Reasoning nuance: {_compact(payload.get('rationale'), 180)}"
+                    )
+                example += (
+                    "\n\nRelated reviewed nuances with the same verified labels:\n"
+                    + "\n".join(nuance_lines)
+                )
+            rendered.append(example)
         sections.append(
             "## Distinctive human-verified reference cases\n\n"
-            "Only high-signal disagreements with distinct outcomes appear here. "
-            "They are evidence, not universal rules; match their reasoning only "
-            "when impact and ownership are comparable.\n\n" + "\n\n".join(rendered)
+            "Every distinct corrected severity/component outcome has one primary "
+            "example. Additional reviews with the same outcome appear as nuances "
+            "instead of duplicate examples. They are evidence, not universal "
+            "rules; match their reasoning only when impact and ownership are "
+            "comparable.\n\n" + "\n\n".join(rendered)
         )
 
     sections.append(
@@ -333,9 +350,7 @@ async def improve_prompt(db: SupabaseClient) -> Row:
     baseline = await get_baseline_prompt(db)
     existing = await list_prompts(db)
 
-    prompt_text = build_improved_prompt_text(
-        baseline["prompt_text"], usable, settings.max_few_shot_examples
-    )
+    prompt_text = build_improved_prompt_text(baseline["prompt_text"], usable)
 
     created = await db.insert(
         "prompt_versions",

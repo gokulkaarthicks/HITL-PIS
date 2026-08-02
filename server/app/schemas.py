@@ -86,12 +86,21 @@ class EvalRunSummary(BaseModel):
     created_at: str
 
 
+class RegressionDetail(BaseModel):
+    example_id: str
+    report_text: str
+    expected: dict[str, str]
+    control_prediction: dict[str, str] | None
+    candidate_prediction: dict[str, str] | None
+    protected: bool
+
+
 class EvalComparison(BaseModel):
     """Before/after metrics returned by POST /eval/run and GET /eval/latest.
 
     During a candidate decision, `previous` is the live control and `active` is
     the candidate being measured; `candidate_decision` says whether it was
-    activated or rejected. Historical comparisons retain the previous/active
+    promoted or rejected. Historical comparisons retain the previous/active
     naming for API compatibility.
     """
 
@@ -104,5 +113,9 @@ class EvalComparison(BaseModel):
     improved_count: int
     example_count: int
     evaluated_at: str
+    protected_regression_count: int = 0
+    regression_details: list[RegressionDetail] = Field(default_factory=list)
+    remaining_error_reduction: float = 0.0
+    ordinary_regression_limit: int = 2
     previous_is_cached: bool = False
-    candidate_decision: Literal["activated", "rejected"] | None = None
+    candidate_decision: Literal["promoted", "rejected"] | None = None

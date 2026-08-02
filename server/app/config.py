@@ -94,11 +94,6 @@ class Settings:
         default_factory=lambda: _env_int("EVAL_CONCURRENCY", 8)
     )
 
-    # Few-shot examples embedded into an improved prompt.
-    max_few_shot_examples: int = field(
-        default_factory=lambda: _env_int("MAX_FEW_SHOT_EXAMPLES", 6)
-    )
-
     cors_allow_origins: str = field(
         default_factory=lambda: _env("CORS_ALLOW_ORIGINS", "http://localhost:5173")
     )
@@ -143,7 +138,6 @@ class Settings:
             "LLM_SEED": ("llm_seed", int),
             "LLM_TIMEOUT_SECONDS": ("llm_timeout_seconds", float),
             "EVAL_CONCURRENCY": ("eval_concurrency", int),
-            "MAX_FEW_SHOT_EXAMPLES": ("max_few_shot_examples", int),
         }
         for binding_name, (attribute_name, converter) in numeric_bindings.items():
             value = _worker_binding(env, binding_name)
