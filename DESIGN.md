@@ -281,7 +281,7 @@ LLM output, and marks fields that differ from the model's proposal as `changed`
 | Few-shot from corrections | Legible, cheap, immediate, reversible | Plateaus; context grows with example count |
 | Rebuild from baseline each time | No drift; prompt is a clean function of corrections | Cannot hand-tune an improved prompt and keep it |
 | Live version as candidate control | Tests exactly what would change at deployment | Deltas do not show cumulative progress against v1 |
-| Fresh candidate arms | Comparable evidence and safe activation | Doubles candidate evaluation calls |
+| Fresh candidate arm with fingerprinted live control | Comparable evidence with 18 calls in the normal path | Cache invalidation or a forced run requires re-scoring both arms |
 | 18 held-out examples | Fast, cheap runs | ±5.6 points per example; small deltas are noise |
 | No auth | Zero friction for a single-reviewer demo | Unsuitable for real multi-user deployment |
 | Corrections are ground truth | Simple, no adjudication UI | One careless reviewer poisons every later prompt |
@@ -311,7 +311,8 @@ deltas.
 
 **3. Richer deployment policy and rollback.** Keep one-click rollback to any
 earlier version and, with a larger gold set, require statistical significance in
-addition to the current positive-delta and zero-regression gate.
+addition to the current 30% remaining-error reduction, per-axis non-decline,
+ordinary-regression budget, and zero-protected-regression gates.
 
 **4. Background evaluation runs.** At 300 examples an evaluation is 600 LLM
 calls, well past an HTTP request's lifetime. Queue the run, stream progress, and
