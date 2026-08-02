@@ -15,6 +15,7 @@ import httpx
 
 from .config import settings
 from .http_client import AsyncHTTPClient, OutboundHTTPClient, OutboundHTTPError
+from .prompt_contract import ENGLISH_OUTPUT_INSTRUCTION
 from .schemas import COMPONENTS, SEVERITIES, Triage
 
 TRIAGE_JSON_SCHEMA: dict[str, Any] = {
@@ -35,6 +36,13 @@ TRIAGE_JSON_SCHEMA: dict[str, Any] = {
 
 class LLMError(RuntimeError):
     """Raised when the provider fails or returns something unusable."""
+
+
+def build_system_prompt(prompt_text: str) -> str:
+    """Apply requirements that must hold even for older stored prompts."""
+    if ENGLISH_OUTPUT_INSTRUCTION in prompt_text:
+        return prompt_text
+    return f"{prompt_text.rstrip()}\n\n{ENGLISH_OUTPUT_INSTRUCTION}"
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -70,7 +78,7 @@ async def classify(
     body: dict[str, Any] = {
         "model": settings.openrouter_model,
         "messages": [
-            {"role": "system", "content": prompt_text},
+            {"role": "system", "content": build_system_prompt(prompt_text)},
             {"role": "user", "content": f"Bug report:\n{report_text}"},
         ],
         "temperature": settings.llm_temperature,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from app import evaluation as evaluation_module
+from app.config import settings
 from app.evaluation import (
     EvaluationError,
     _passes_promotion_gate,
@@ -129,6 +130,20 @@ def make_candidate_db() -> FakeSupabase:
     )
 
 
+def add_candidate(db: FakeSupabase, prompt_id: str = "p2") -> None:
+    db.tables["prompt_versions"].append(
+        {
+            "id": prompt_id,
+            "version_name": f"v{prompt_id.removeprefix('p')}-improved",
+            "prompt_text": f"baseline prompt\n\n## {IMPROVED_MARKER}\n...",
+            "is_active": False,
+            "lifecycle_status": "candidate",
+            "created_from_corrections_count": 3,
+            "created_at": f"2026-0{prompt_id.removeprefix('p')}-01T00:00:00+00:00",
+        }
+    )
+
+
 @pytest.fixture
 def scripted_llm(monkeypatch):
     """Replace the OpenRouter call with a deterministic lookup."""
@@ -240,6 +255,60 @@ async def test_candidate_with_gain_and_zero_regressions_is_promoted(monkeypatch)
     assert result.regression_count == 0
     assert db.tables["prompt_versions"][0]["lifecycle_status"] == "superseded"
     assert db.tables["prompt_versions"][1]["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_candidate_reuses_fingerprinted_active_run(scripted_llm):
+    db = make_db(with_improved_prompt=False)
+    await run_evaluation(db, llm_client=None)
+    calls_after_active_measurement = len(scripted_llm)
+    add_candidate(db)
+    events: list[dict] = []
+
+    async def on_progress(event):
+        events.append(event)
+
+    result = await run_evaluation(db, llm_client=None, on_progress=on_progress)
+
+    assert len(scripted_llm) - calls_after_active_measurement == 4
+    assert len(events) == 4
+    assert all(event["total"] == 4 for event in events)
+    assert all(event["arm"] == "candidate" for event in events)
+    assert result.previous_is_cached is True
+    assert result.previous.version_name == "v1-baseline"
+    assert result.active.version_name == "v2-improved"
+
+
+@pytest.mark.asyncio
+async def test_candidate_cache_invalidates_when_model_changes(
+    scripted_llm, monkeypatch
+):
+    db = make_db(with_improved_prompt=False)
+    await run_evaluation(db, llm_client=None)
+    calls_after_active_measurement = len(scripted_llm)
+    add_candidate(db)
+    monkeypatch.setattr(settings, "openrouter_model", "changed/model")
+
+    result = await run_evaluation(db, llm_client=None)
+
+    assert len(scripted_llm) - calls_after_active_measurement == 8
+    assert result.previous_is_cached is False
+
+
+@pytest.mark.asyncio
+async def test_promoted_candidate_results_become_next_active_cache(scripted_llm):
+    db = make_db(with_improved_prompt=False)
+    await run_evaluation(db, llm_client=None)
+    add_candidate(db)
+    first_candidate = await run_evaluation(db, llm_client=None)
+    assert first_candidate.candidate_decision == "promoted"
+    calls_after_promotion = len(scripted_llm)
+    add_candidate(db, "p3")
+
+    second_candidate = await run_evaluation(db, llm_client=None)
+
+    assert len(scripted_llm) - calls_after_promotion == 4
+    assert second_candidate.previous_is_cached is True
 
 
 def regression_detail(*, protected: bool = False) -> RegressionDetail:

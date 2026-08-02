@@ -22,13 +22,13 @@ const SECTIONS = [
       'Saved corrections are trusted ground truth; one bad correction can shape every later candidate because there is no agreement workflow.',
       'Labels are treated as stable and defensible, even though reviewers can disagree on borderline cases.',
       'Eighteen examples are too few for confidence intervals; rationale is stored for humans but not scored.',
-      'Both evaluation arms use the same model and decoding settings so the prompt text is the only variable.',
+      'The active evaluation arm is reused only while its prompt, model settings, output contract, and held-out dataset fingerprint still match.',
     ],
   },
   {
     title: 'with more time',
     points: [
-      'Grow a versioned gold set with multiple reviewers, report agreement and confidence intervals, and gate on statistical improvement plus zero regressions.',
+      'Grow a versioned gold set with multiple reviewers, report agreement and confidence intervals, and add statistical improvement gates for larger samples.',
       'Add authentication, roles, optimistic locking, candidate approval, and one-click rollback.',
       'Show per-example diffs and a full history from v1 through every accepted or rejected candidate, with cost and latency per run.',
       'Queue long evaluations, retry provider rate limits without counting them as model errors, and retrieve relevant corrections before considering fine-tuning.',

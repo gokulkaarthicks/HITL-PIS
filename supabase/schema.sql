@@ -150,8 +150,13 @@ create table if not exists evaluation_runs (
     component_accuracy double precision not null,
     overall_accuracy   double precision not null,
     regression_count   integer          not null default 0,
+    cache_fingerprint  text,
     created_at         timestamptz      not null default now()
 );
+
+-- Additive cache migration for databases created before fingerprinted reuse.
+alter table evaluation_runs
+    add column if not exists cache_fingerprint text;
 
 create index if not exists evaluation_runs_created_at_idx
     on evaluation_runs (created_at);
@@ -259,8 +264,8 @@ revoke all on function public.reset_demo() from public, anon, authenticated;
 grant execute on function public.reset_demo() to service_role;
 
 -- Resolve a held-out evaluation as one transaction. A candidate can become
--- active only when the application has already verified a positive delta and
--- zero regressions; otherwise it is retained as rejected evidence.
+-- active only when the application has already verified every deterministic
+-- promotion guardrail; otherwise it is retained as rejected evidence.
 create or replace function public.resolve_prompt_candidate(
     p_candidate_id uuid,
     p_evaluated_against_prompt_id uuid,
